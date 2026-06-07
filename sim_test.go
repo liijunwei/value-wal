@@ -14,7 +14,7 @@ const (
 	exchangeInit = 100_000_000
 	numUsers     = 10_000
 	maxInitCap   = 10_000
-	totalRounds  = 1_000_000
+	totalRounds  = 30_000 // 每轮 30~50 笔撮合 → 总量 ~1.2M 笔
 	transferCap  = 1000
 )
 
@@ -90,23 +90,26 @@ func TestSimulation(t *testing.T) {
 		if len(activeList) < 2 {
 			continue
 		}
-		i, j := rng.IntN(len(activeList)), rng.IntN(len(activeList))
-		from, to := activeList[i], activeList[j]
+		matches := 30 + rng.IntN(21) // 30~50 组
+		for m := 0; m < matches; m++ {
+			i, j := rng.IntN(len(activeList)), rng.IntN(len(activeList))
+			from, to := activeList[i], activeList[j]
 
-		fromBal, ok := w.Balance(from)
-		assert(ok, "balance lookup")
-		if fromBal == 0 {
-			fail++
-			continue
-		}
-		amount := 1 + rng.IntN(min(fromBal, transferCap))
-		if amount == fromBal {
-			allIn++
-		}
-		if err := w.Transfer(from, to, amount); err != nil {
-			fail++
-		} else {
-			success++
+			fromBal, ok := w.Balance(from)
+			assert(ok, "balance lookup")
+			if fromBal == 0 {
+				fail++
+				continue
+			}
+			amount := 1 + rng.IntN(min(fromBal, transferCap))
+			if amount == fromBal {
+				allIn++
+			}
+			if err := w.Transfer(from, to, amount); err != nil {
+				fail++
+			} else {
+				success++
+			}
 		}
 	}
 
