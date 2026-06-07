@@ -5,35 +5,35 @@ Producer: appending facts to the WAL...
 WAL has 6 immutable entries
 
   audit-service consumed 6 events from offset 0
-    [1] open map[owner:alice]
-    [2] open map[owner:bob]
-    [3] deposit map[amount:1000 owner:alice]
-    [4] deposit map[amount:500 owner:bob]
-    [5] transfer map[amount:300 from:alice to:bob]
-    [6] withdraw map[amount:200 owner:alice]
+    {"id":1,"type":"open","data":{"owner":"alice"}}
+    {"id":2,"type":"open","data":{"owner":"bob"}}
+    {"id":3,"type":"deposit","data":{"amount":"1000","owner":"alice"}}
+    {"id":4,"type":"deposit","data":{"amount":"500","owner":"bob"}}
+    {"id":5,"type":"transfer","data":{"amount":"300","from":"alice","to":"bob"}}
+    {"id":6,"type":"withdraw","data":{"amount":"200","owner":"alice"}}
 
   notification-service consumed first 2, paused at offset 6
 
 Producer: more facts...
   notification-service resumed, caught up: 1 more events
-    [7] deposit map[amount:150 owner:bob]
+    {"id":7,"type":"deposit","data":{"amount":"150","owner":"bob"}}
 
   audit-service got 1 new event(s)
 
   state = f(log): deriving bank accounts from WAL replay...
-    alice: balance = 500
-    bob: balance = 950
+    {"owner":"bob","balance":950}
+    {"owner":"alice","balance":500}
 
   historical state (first 5 facts only):
-    alice: balance = 700
-    bob: balance = 800
+    {"owner":"alice","balance":700}
+    {"owner":"bob","balance":800}
 
 --- Demo 2: Persistent file WAL (append-only, same as in-memory) ---
   Wrote 3 entries to /tmp/value-wal-demo.log
   File contains 3 entries:
-    [1] open map[owner:carol]
-    [2] deposit map[amount:5000 owner:carol]
-    [3] withdraw map[amount:1200 owner:carol]
+    {"id":1,"type":"open","data":{"owner":"carol"}}
+    {"id":2,"type":"deposit","data":{"amount":"5000","owner":"carol"}}
+    {"id":3,"type":"withdraw","data":{"amount":"1200","owner":"carol"}}
 
   Reopened after 'crash': 3 entries recovered
 

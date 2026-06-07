@@ -14,9 +14,9 @@ import (
 // This is the core idea from Hickey's "The Value of Values":
 // values don't change — you perceive them, you don't "acquire" a mutable place.
 type Value struct {
-	ID   int
-	Type string // "deposit" | "withdraw" | "transfer"
-	Data map[string]string
+	ID   int               `json:"id"`
+	Type string            `json:"type"`
+	Data map[string]string `json:"data"`
 }
 
 // The WAL is an append-only log of immutable Values.
@@ -95,8 +95,8 @@ func (c *Consumer) Poll() []Value {
 // --- State is NOT mutated in place. It is DERIVED by replaying the WAL. ---
 
 type BankAccount struct {
-	Owner   string
-	Balance int
+	Owner   string `json:"owner"`
+	Balance int    `json:"balance"`
 }
 
 // deriveState replays the entire WAL to produce current state.
@@ -114,16 +114,19 @@ func deriveState(wal *WAL) map[string]*BankAccount {
 			accounts[v.Data["owner"]] = &BankAccount{Owner: v.Data["owner"], Balance: 0}
 		case "deposit":
 			acc := accounts[v.Data["owner"]]
-			amount, _ := strconv.Atoi(v.Data["amount"])
+			amount, err := strconv.Atoi(v.Data["amount"])
+			assert(err == nil, "parse deposit amount")
 			acc.Balance += amount
 		case "withdraw":
 			acc := accounts[v.Data["owner"]]
-			amount, _ := strconv.Atoi(v.Data["amount"])
+			amount, err := strconv.Atoi(v.Data["amount"])
+			assert(err == nil, "parse withdraw amount")
 			acc.Balance -= amount
 		case "transfer":
 			from := accounts[v.Data["from"]]
 			to := accounts[v.Data["to"]]
-			amount, _ := strconv.Atoi(v.Data["amount"])
+			amount, err := strconv.Atoi(v.Data["amount"])
+			assert(err == nil, "parse transfer amount")
 			from.Balance -= amount
 			to.Balance += amount
 		}
@@ -210,8 +213,14 @@ func parseEntriesFrom(r *os.File) []Value {
 		}
 		entries = append(entries, v)
 	}
-	_ = scanner.Err() // partial read is acceptable; entries parsed so far are returned
+	assert(scanner.Err() == nil, "scan WAL entries")
 	return entries
+}
+
+func assert(ok bool, msg string) {
+	if !ok {
+		panic("assertion failed: " + msg)
+	}
 }
 
 func main() {
@@ -247,7 +256,9 @@ func demo1_InMemory() {
 	events := c1.Poll()
 	fmt.Printf("  %s consumed %d events from offset 0\n", c1.Name, len(events))
 	for _, v := range events {
-		fmt.Printf("    [%d] %s %v\n", v.ID, v.Type, v.Data)
+		b, err := json.Marshal(v)
+		assert(err == nil, "marshal Value")
+		fmt.Printf("    %s\n", b)
 	}
 
 	// Consumer 2 reads only first 2, then comes back later for the rest.
@@ -264,7 +275,9 @@ func demo1_InMemory() {
 	rest := c2.Poll()
 	fmt.Printf("  %s resumed, caught up: %d more events\n", c2.Name, len(rest))
 	for _, v := range rest {
-		fmt.Printf("    [%d] %s %v\n", v.ID, v.Type, v.Data)
+		b, err := json.Marshal(v)
+		assert(err == nil, "marshal Value")
+		fmt.Printf("    %s\n", b)
 	}
 
 	// Consumer 1 also sees the new fact.
@@ -276,7 +289,9 @@ func demo1_InMemory() {
 	fmt.Println("\n  state = f(log): deriving bank accounts from WAL replay...")
 	accounts := deriveState(wal)
 	for _, acc := range accounts {
-		fmt.Printf("    %s: balance = %d\n", acc.Owner, acc.Balance)
+		b, err := json.Marshal(acc)
+		assert(err == nil, "marshal BankAccount")
+		fmt.Printf("    %s\n", b)
 	}
 
 	// If we replay from only the first 5 entries, we get a different state.
@@ -284,7 +299,9 @@ func demo1_InMemory() {
 	fmt.Println("\n  historical state (first 5 facts only):")
 	partial := &WAL{entries: wal.entries[:5]}
 	for _, acc := range deriveState(partial) {
-		fmt.Printf("    %s: balance = %d\n", acc.Owner, acc.Balance)
+		b, err := json.Marshal(acc)
+		assert(err == nil, "marshal BankAccount")
+		fmt.Printf("    %s\n", b)
 	}
 
 	fmt.Println()
@@ -314,7 +331,9 @@ func demo2_DiskWAL() {
 	entries := fw.Entries()
 	fmt.Printf("  File contains %d entries:\n", len(entries))
 	for _, v := range entries {
-		fmt.Printf("    [%d] %s %v\n", v.ID, v.Type, v.Data)
+		b, err := json.Marshal(v)
+		assert(err == nil, "marshal Value")
+		fmt.Printf("    %s\n", b)
 	}
 
 	// Simulate crash recovery: reopen the file, it's still there.
