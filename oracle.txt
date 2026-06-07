@@ -21,8 +21,8 @@ Producer: more facts...
   audit-service got 1 new event(s)
 
   state = f(log): deriving bank accounts from WAL replay...
-    {"owner":"bob","balance":950}
     {"owner":"alice","balance":500}
+    {"owner":"bob","balance":950}
 
   historical state (first 5 facts only):
     {"owner":"alice","balance":700}
