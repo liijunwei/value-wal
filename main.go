@@ -7,8 +7,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"sort"
-	"strconv"
 	"sync"
 )
 
@@ -101,49 +99,6 @@ func parseEntriesFrom(r *os.File) []Value {
 	return entries
 }
 
-type BankAccount struct {
-	Owner   string `json:"owner"`
-	Balance int    `json:"balance"`
-}
-
-func deriveState(entries []Value) []*BankAccount {
-	accounts := make(map[string]*BankAccount)
-	for _, v := range entries {
-		switch v.Type {
-		case "open":
-			accounts[v.Data["owner"]] = &BankAccount{Owner: v.Data["owner"], Balance: 0}
-		case "deposit":
-			acc := accounts[v.Data["owner"]]
-			amount, err := strconv.Atoi(v.Data["amount"])
-			assert(err == nil, "parse deposit amount")
-			acc.Balance += amount
-		case "withdraw":
-			acc := accounts[v.Data["owner"]]
-			amount, err := strconv.Atoi(v.Data["amount"])
-			assert(err == nil, "parse withdraw amount")
-			acc.Balance -= amount
-		case "transfer":
-			from := accounts[v.Data["from"]]
-			to := accounts[v.Data["to"]]
-			amount, err := strconv.Atoi(v.Data["amount"])
-			assert(err == nil, "parse transfer amount")
-			from.Balance -= amount
-			to.Balance += amount
-		}
-	}
-
-	keys := make([]string, 0, len(accounts))
-	for k := range accounts {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	result := make([]*BankAccount, len(keys))
-	for i, k := range keys {
-		result[i] = accounts[k]
-	}
-	return result
-}
-
 func assert(ok bool, msg string) {
 	if !ok {
 		panic("assertion failed: " + msg)
@@ -151,48 +106,48 @@ func assert(ok bool, msg string) {
 }
 
 func main() {
-	path := "value-wal.jsonl"
+	path := "wallet.jsonl"
 	os.Remove(path)
 
-	fw, err := NewFileWAL(path)
+	w, err := NewWallet(path)
 	if err != nil {
 		fmt.Println("Error:", err)
 		return
 	}
+	defer w.Close()
 
-	fw.Append("open", map[string]string{"owner": "alice"})
-	fw.Append("open", map[string]string{"owner": "bob"})
-	fw.Append("deposit", map[string]string{"owner": "alice", "amount": "1000"})
-	fw.Append("deposit", map[string]string{"owner": "bob", "amount": "500"})
-	fw.Append("transfer", map[string]string{"from": "alice", "to": "bob", "amount": "300"})
-	fw.Append("withdraw", map[string]string{"owner": "alice", "amount": "200"})
-	fw.Append("deposit", map[string]string{"owner": "bob", "amount": "150"})
+	// 建钱包
+	w.Create("alice")
+	w.Create("bob")
 
-	entries := fw.Entries()
-	fmt.Printf("WAL has %d entries in %s:\n", len(entries), path)
-	for _, v := range entries {
-		b, err := json.Marshal(v)
-		assert(err == nil, "marshal Value")
-		fmt.Printf("  %s\n", b)
+	// 存款
+	w.Deposit("alice", 1000)
+	w.Deposit("bob", 500)
+
+	// 转账
+	if err := w.Transfer("alice", "bob", 300); err != nil {
+		fmt.Println("transfer:", err)
 	}
 
-	fmt.Println("Current state (all 7 facts):")
-	for _, acc := range deriveState(entries) {
-		b, err := json.Marshal(acc)
-		assert(err == nil, "marshal BankAccount")
-		fmt.Printf("  %s\n", b)
+	// 余额不足
+	if err := w.Withdraw("alice", 2000); err != nil {
+		fmt.Println("withdraw rejected:", err)
 	}
 
-	fmt.Println("Historical state (first 5 facts only):")
-	for _, acc := range deriveState(entries[:5]) {
-		b, err := json.Marshal(acc)
-		assert(err == nil, "marshal BankAccount")
-		fmt.Printf("  %s\n", b)
+	// 正常提现
+	w.Withdraw("alice", 200)
+
+	fmt.Println("balances:")
+	for owner, bal := range w.Balances() {
+		fmt.Printf("  %s: %d\n", owner, bal)
 	}
 
-	fw.Close()
-
-	fw2, _ := NewFileWAL(path)
-	defer fw2.Close()
-	fmt.Printf("\nReopened: %d entries recovered\n", len(fw2.Entries()))
+	// 崩溃恢复
+	w.Close()
+	w2, _ := NewWallet(path)
+	defer w2.Close()
+	fmt.Println("\nafter reopen:")
+	for owner, bal := range w2.Balances() {
+		fmt.Printf("  %s: %d\n", owner, bal)
+	}
 }
