@@ -1,6 +1,6 @@
 === Value-WAL: append-only, immutable facts ===
 
-WAL has 7 entries in /tmp/value-wal-demo.log:
+WAL has 7 entries in value-wal.jsonl:
   {"id":1,"type":"open","data":{"owner":"alice"}}
   {"id":2,"type":"open","data":{"owner":"bob"}}
   {"id":3,"type":"deposit","data":{"amount":"1000","owner":"alice"}}

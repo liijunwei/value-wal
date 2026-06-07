@@ -151,7 +151,7 @@ func assert(ok bool, msg string) {
 
 func main() {
 	path := "value-wal.jsonl"
-	os.Remove(path)
+	assert(os.Remove(path) == nil, "failed to delete jsonl file")
 
 	fw, err := NewFileWAL(path)
 	if err != nil {
