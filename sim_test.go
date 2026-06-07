@@ -155,17 +155,21 @@ func TestSimulation(t *testing.T) {
 	fmt.Println()
 	fmt.Printf("交易所余额: %d\n", exBal)
 	fmt.Println()
-	fmt.Printf("用户初始资金总计: %d\n", totalInitial)
-	fmt.Printf("用户最终余额总计: %d (涨跌: %+d, %.2f%%)\n",
-		totalFinal-exBal, totalFinal-exBal-totalInitial,
-		float64(totalFinal-exBal-totalInitial)/float64(totalInitial)*100)
+	fmt.Printf("用户人数: %d (人均初始 %d, 人均最终 %d)\n",
+		len(results), totalInitial/len(results), (totalFinal-exBal)/len(results))
 	fmt.Println()
-	fmt.Printf("用户涨跌分布: 赚=%d, 亏=%d, 持平=%d\n", gainCount, lossCount, evenCount)
+	fmt.Println("初始余额分布:")
+	printInitDistrib(results)
 	fmt.Println()
-	fmt.Println("活跃用户余额分布:")
+	fmt.Printf("盈亏分布: 赚=%d, 亏=%d, 持平=%d\n", gainCount, lossCount, evenCount)
+	fmt.Println()
+	fmt.Println("最终余额分布（全部用户）:")
+	printBalDistrib(results, func(r userResult) bool { return true })
+	fmt.Println()
+	fmt.Println("  活跃用户:")
 	printBalDistrib(results, func(r userResult) bool { return r.active })
 	fmt.Println()
-	fmt.Println("离场用户余额分布:")
+	fmt.Println("  离场用户:")
 	printBalDistrib(results, func(r userResult) bool { return !r.active })
 	fmt.Println()
 	// 梭哈用户（至少一次转账清空余额）
@@ -242,6 +246,22 @@ func activeKeys(m map[string]bool) []string {
 		keys = append(keys, k)
 	}
 	return keys
+}
+
+func printInitDistrib(results []userResult) {
+	var bals []int
+	var sum int
+	for _, r := range results {
+		bals = append(bals, r.initial)
+		sum += r.initial
+	}
+	sort.Ints(bals)
+	p := func(frac float64) int {
+		idx := int(frac * float64(len(bals)-1))
+		return bals[idx]
+	}
+	fmt.Printf("  count=%d  sum=%d  min=%d  p25=%d  p50=%d  p75=%d  p95=%d  p99=%d  max=%d\n",
+		len(bals), sum, bals[0], p(0.25), p(0.50), p(0.75), p(0.95), p(0.99), bals[len(bals)-1])
 }
 
 func printBalDistrib(results []userResult, filter func(userResult) bool) {
