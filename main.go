@@ -160,7 +160,6 @@ func main() {
 	}
 
 	fmt.Println("=== Value-WAL: append-only, immutable facts ===")
-	fmt.Println()
 
 	// Append facts — these are immutable values.
 	fw.Append("open", map[string]string{"owner": "alice"})
@@ -180,7 +179,6 @@ func main() {
 	}
 
 	// State is derived by replaying the log: state = f(log).
-	fmt.Println()
 	fmt.Println("Current state (all 7 facts):")
 	for _, acc := range deriveState(entries) {
 		b, err := json.Marshal(acc)
@@ -189,7 +187,6 @@ func main() {
 	}
 
 	// Point-in-time: replay only a prefix for historical state.
-	fmt.Println()
 	fmt.Println("Historical state (first 5 facts only):")
 	for _, acc := range deriveState(entries[:5]) {
 		b, err := json.Marshal(acc)
@@ -204,7 +201,6 @@ func main() {
 	defer fw2.Close()
 	fmt.Printf("\nReopened after crash: %d entries recovered\n", len(fw2.Entries()))
 
-	fmt.Println()
 	fmt.Println("Takeaway:")
 	fmt.Println("  - WAL stores immutable facts, never mutates")
 	fmt.Println("  - State is derived by replaying the log: state = f(log)")
