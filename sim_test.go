@@ -28,19 +28,18 @@ func TestSimulation(t *testing.T) {
 	defer w.Close()
 	defer os.Remove(path)
 
-	w.Create("exchange")
-	w.Deposit("exchange", exchangeInit)
+	assert(w.Create("exchange") == nil, "create exchange")
+	assert(w.Deposit("exchange", exchangeInit) == nil, "fund exchange")
 
-	// activeList: 维护活跃用户 slice，swap-delete 实现 O(1) 离场
 	activeList := make([]string, 0, numUsers)
 	activeSet := make(map[string]bool, numUsers)
 	inactive := make(map[string]bool)
 
 	for i := 0; i < numUsers; i++ {
 		name := "u" + strconv.Itoa(i)
-		w.Create(name)
+		assert(w.Create(name) == nil, "create user")
 		cap := 100 + rand.IntN(maxInitCap-100+1)
-		w.Transfer("exchange", name, cap)
+		assert(w.Transfer("exchange", name, cap) == nil, "initial fund transfer")
 		activeList = append(activeList, name)
 		activeSet[name] = true
 	}
@@ -55,9 +54,9 @@ func TestSimulation(t *testing.T) {
 		if round < numUsers/2 && rng.IntN(100) == 0 {
 			name := "u" + strconv.Itoa(numUsers+len(joinSeq))
 			joinSeq = append(joinSeq, name)
-			w.Create(name)
+			assert(w.Create(name) == nil, "mid-join create")
 			cap := 100 + rng.IntN(maxInitCap-100+1)
-			w.Transfer("exchange", name, cap)
+			assert(w.Transfer("exchange", name, cap) == nil, "mid-join fund")
 			activeList = append(activeList, name)
 			activeSet[name] = true
 		}
@@ -83,7 +82,8 @@ func TestSimulation(t *testing.T) {
 		i, j := rng.IntN(len(activeList)), rng.IntN(len(activeList))
 		from, to := activeList[i], activeList[j]
 
-		fromBal, _ := w.Balance(from)
+		fromBal, ok := w.Balance(from)
+		assert(ok, "balance lookup")
 		if fromBal == 0 {
 			fail++
 			continue
@@ -96,15 +96,18 @@ func TestSimulation(t *testing.T) {
 		}
 	}
 
-	exBal, _ := w.Balance("exchange")
+	exBal, ok := w.Balance("exchange")
+	assert(ok, "exchange balance")
 
 	var actBals, inactBals []int
 	for name := range activeSet {
-		bal, _ := w.Balance(name)
+		bal, ok := w.Balance(name)
+		assert(ok, "active balance lookup")
 		actBals = append(actBals, bal)
 	}
 	for name := range inactive {
-		bal, _ := w.Balance(name)
+		bal, ok := w.Balance(name)
+		assert(ok, "inactive balance lookup")
 		inactBals = append(inactBals, bal)
 	}
 	sort.Ints(actBals)
@@ -216,7 +219,8 @@ func TestSimPropertySum(t *testing.T) {
 			idx := rng.Perm(len(names))
 			a, b := names[idx[0]], names[idx[1]]
 
-			bal, _ := w.Balance(a)
+			bal, ok := w.Balance(a)
+			assert(ok, "balance a")
 			if bal == 0 {
 				continue
 			}
@@ -236,7 +240,8 @@ func TestSimPropertySum(t *testing.T) {
 			}
 			if w.Create(name) == nil {
 				exists[name] = true
-				bal, _ := w.Balance("bank")
+				bal, ok := w.Balance("bank")
+			assert(ok, "balance bank")
 				if bal > 0 {
 					amount := rng.IntN(min(bal, 10000) + 1)
 					if amount > 0 {
@@ -248,7 +253,8 @@ func TestSimPropertySum(t *testing.T) {
 
 		currentSum := 0
 		for name := range exists {
-			bal, _ := w.Balance(name)
+			bal, ok := w.Balance(name)
+			assert(ok, "balance sum check")
 			currentSum += bal
 		}
 		if currentSum != sum {
@@ -256,7 +262,8 @@ func TestSimPropertySum(t *testing.T) {
 		}
 
 		for name := range exists {
-			bal, _ := w.Balance(name)
+			bal, ok := w.Balance(name)
+			assert(ok, "balance negative check")
 			if bal < 0 {
 				t.Fatalf("op %d: %s balance=%d < 0", i, name, bal)
 			}
@@ -335,7 +342,8 @@ func FuzzSimulation(f *testing.F) {
 				if err != nil || amount <= 0 || !created[name] {
 					continue
 				}
-				bal, _ := w.Balance(name)
+				bal, ok := w.Balance(name)
+				assert(ok, "fuzz withdraw balance")
 				if bal >= amount && w.Withdraw(name, amount) == nil {
 					sum -= amount
 				}
@@ -350,7 +358,8 @@ func FuzzSimulation(f *testing.F) {
 				if err != nil || amount <= 0 || from == to || !created[from] || !created[to] {
 					continue
 				}
-				bal, _ := w.Balance(from)
+				bal, ok := w.Balance(from)
+				assert(ok, "fuzz transfer balance")
 				if bal >= amount {
 					w.Transfer(from, to, amount)
 				}
@@ -360,7 +369,8 @@ func FuzzSimulation(f *testing.F) {
 		// 最终验证
 		currentSum := 0
 		for name := range created {
-			bal, _ := w.Balance(name)
+			bal, ok := w.Balance(name)
+			assert(ok, "fuzz final check")
 			if bal < 0 {
 				t.Fatalf("%s balance=%d < 0", name, bal)
 			}
@@ -376,13 +386,14 @@ func BenchmarkSimulation(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		path := "sim-bench-wal.jsonl"
 		os.Remove(path)
-		w, _ := NewWallet(path)
-		w.Create("exchange")
-		w.Deposit("exchange", exchangeInit)
+		w, err := NewWallet(path)
+		assert(err == nil, "bench new wallet")
+		assert(w.Create("exchange") == nil, "bench create exchange")
+		assert(w.Deposit("exchange", exchangeInit) == nil, "bench fund exchange")
 		for j := 0; j < 1000; j++ {
 			name := "u" + strconv.Itoa(j)
-			w.Create(name)
-			w.Transfer("exchange", name, rand.IntN(maxInitCap+1))
+			assert(w.Create(name) == nil, "bench create user")
+			assert(w.Transfer("exchange", name, rand.IntN(maxInitCap+1)) == nil, "bench fund user")
 		}
 		rng := rand.New(rand.NewPCG(42, 0))
 		for round := 0; round < 100000; round++ {
@@ -391,7 +402,8 @@ func BenchmarkSimulation(b *testing.B) {
 			if from == to {
 				continue
 			}
-			fromBal, _ := w.Balance(from)
+			fromBal, ok := w.Balance(from)
+			assert(ok, "bench balance")
 			if fromBal > 0 {
 				amount := 1 + rng.IntN(min(fromBal, 1000))
 				w.Transfer(from, to, amount)

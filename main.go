@@ -136,7 +136,9 @@ func main() {
 	}
 
 	// 正常提现
-	w.Withdraw("alice", 200)
+	if err := w.Withdraw("alice", 200); err != nil {
+		fmt.Println("withdraw:", err)
+	}
 
 	fmt.Println("balances:")
 	for owner, bal := range w.Balances() {
@@ -145,7 +147,8 @@ func main() {
 
 	// 崩溃恢复
 	w.Close()
-	w2, _ := NewWallet(path)
+	w2, err := NewWallet(path)
+	assert(err == nil, "reopen wallet after close")
 	defer w2.Close()
 	fmt.Println("\nafter reopen:")
 	for owner, bal := range w2.Balances() {
