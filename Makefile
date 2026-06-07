@@ -1,35 +1,39 @@
-.PHONY: test test-sim test-pbt fuzz bench cover run lint
+# 交易所模拟 - 基于 WAL 的钱包系统
+#
+# 用法: make [target]
+# 默认 target: help
 
-# 运行所有测试
-test:
+.DEFAULT_GOAL := help
+
+.PHONY: help test test-sim test-pbt fuzz fuzz-crash bench cover run
+
+help: ## 显示帮助
+	@echo "targets:"
+	@echo ""
+	@awk 'BEGIN { FS=":.*## " } /^[a-zA-Z_-]+:.*## / { printf "  %-16s %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
+
+test: ## 运行所有测试
 	go test -count=1 -timeout 120s ./...
 
-# 运行交易所模拟（1万用户、100万轮交易），输出资金分布报告
-test-sim:
+test-sim: ## 交易所模拟（1万用户、100万轮交易），输出资金分布报告
 	go test -v -run TestSimulation$$ -count=1 -timeout 30s .
 
-# 运行资金守恒 PBT（5000 次随机操作，每步校验）
-test-pbt:
+test-pbt: ## 资金守恒 PBT（5000 次随机操作，每步校验不变式）
 	go test -v -run TestSimPropertySum$$ -count=1 -timeout 30s .
 
-# 模糊测试（随机命令序列，30 秒）
-fuzz:
+fuzz: ## 模糊测试（随机命令序列，30 秒）
 	go test -fuzz=FuzzSimulation -fuzztime=30s -timeout 60s .
 
-# 崩溃恢复模糊测试
-fuzz-crash:
+fuzz-crash: ## 崩溃恢复模糊测试
 	go test -fuzz=FuzzCrashRecovery -fuzztime=30s -timeout 60s .
 
-# 基准测试
-bench:
+bench: ## 基准测试
 	go test -bench=. -benchtime=3s -timeout 120s .
 
-# 测试覆盖率报告
-cover:
+cover: ## 测试覆盖率报告
 	go test -coverprofile=cover.out -timeout 30s ./...
 	go tool cover -func=cover.out
 	rm -f cover.out
 
-# 运行钱包演示
-run:
+run: ## 运行钱包演示
 	go run .
