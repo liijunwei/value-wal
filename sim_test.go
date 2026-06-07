@@ -31,19 +31,18 @@ func TestSimulation(t *testing.T) {
 	w.Create("exchange")
 	w.Deposit("exchange", exchangeInit)
 
-	active := make(map[string]bool)
+	// activeList: 维护活跃用户 slice，swap-delete 实现 O(1) 离场
+	activeList := make([]string, 0, numUsers)
+	activeSet := make(map[string]bool, numUsers)
 	inactive := make(map[string]bool)
 
-	users := make([]string, numUsers)
 	for i := 0; i < numUsers; i++ {
 		name := "u" + strconv.Itoa(i)
-		users[i] = name
 		w.Create(name)
-		cap := rand.IntN(maxInitCap + 1)
-		if cap > 0 {
-			w.Transfer("exchange", name, cap)
-		}
-		active[name] = true
+		cap := 100 + rand.IntN(maxInitCap-100+1)
+		w.Transfer("exchange", name, cap)
+		activeList = append(activeList, name)
+		activeSet[name] = true
 	}
 
 	success := 0
@@ -57,30 +56,32 @@ func TestSimulation(t *testing.T) {
 			name := "u" + strconv.Itoa(numUsers+len(joinSeq))
 			joinSeq = append(joinSeq, name)
 			w.Create(name)
-			cap := rng.IntN(maxInitCap + 1)
-			if cap > 0 {
-				w.Transfer("exchange", name, cap)
-			}
-			active[name] = true
+			cap := 100 + rng.IntN(maxInitCap-100+1)
+			w.Transfer("exchange", name, cap)
+			activeList = append(activeList, name)
+			activeSet[name] = true
 		}
 
+		// 离场: swap-delete
 		if round > 0 && round%1000 == 0 {
 			nLeave := 1 + rng.IntN(5)
-			act := activeKeys(active)
-			if len(act) > nLeave+10 {
-				for _, name := range rng.Perm(len(act))[:nLeave] {
-					delete(active, act[name])
-					inactive[act[name]] = true
+			if len(activeList) > nLeave+10 {
+				for k := 0; k < nLeave; k++ {
+					i := rng.IntN(len(activeList))
+					name := activeList[i]
+					delete(activeSet, name)
+					inactive[name] = true
+					activeList[i] = activeList[len(activeList)-1]
+					activeList = activeList[:len(activeList)-1]
 				}
 			}
 		}
 
-		act := activeKeys(active)
-		if len(act) < 2 {
+		if len(activeList) < 2 {
 			continue
 		}
-		idx := rng.Perm(len(act))
-		from, to := act[idx[0]], act[idx[1]]
+		i, j := rng.IntN(len(activeList)), rng.IntN(len(activeList))
+		from, to := activeList[i], activeList[j]
 
 		fromBal, _ := w.Balance(from)
 		if fromBal == 0 {
@@ -98,7 +99,7 @@ func TestSimulation(t *testing.T) {
 	exBal, _ := w.Balance("exchange")
 
 	var actBals, inactBals []int
-	for name := range active {
+	for name := range activeSet {
 		bal, _ := w.Balance(name)
 		actBals = append(actBals, bal)
 	}
@@ -119,7 +120,7 @@ func TestSimulation(t *testing.T) {
 
 	fmt.Println("=== 交易所模拟报告 ===")
 	fmt.Printf("交易轮数: %d (成功 %d, 失败 %d)\n", totalRounds, success, fail)
-	fmt.Printf("总用户: active=%d, inactive=%d, 中途入场=%d\n", len(active), len(inactive), len(joinSeq))
+	fmt.Printf("总用户: active=%d, inactive=%d, 中途入场=%d\n", len(activeSet), len(inactive), len(joinSeq))
 	fmt.Println()
 	fmt.Printf("资金守恒: exchange_init=%d, current_sum=%d, diff=%d\n", exchangeInit, total, total-exchangeInit)
 	fmt.Println()
@@ -369,4 +370,34 @@ func FuzzSimulation(f *testing.F) {
 			t.Fatalf("sum mismatch: current=%d, expected=%d", currentSum, sum)
 		}
 	})
+}
+
+func BenchmarkSimulation(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		path := "sim-bench-wal.jsonl"
+		os.Remove(path)
+		w, _ := NewWallet(path)
+		w.Create("exchange")
+		w.Deposit("exchange", exchangeInit)
+		for j := 0; j < 1000; j++ {
+			name := "u" + strconv.Itoa(j)
+			w.Create(name)
+			w.Transfer("exchange", name, rand.IntN(maxInitCap+1))
+		}
+		rng := rand.New(rand.NewPCG(42, 0))
+		for round := 0; round < 100000; round++ {
+			from := "u" + strconv.Itoa(rng.IntN(1000))
+			to := "u" + strconv.Itoa(rng.IntN(1000))
+			if from == to {
+				continue
+			}
+			fromBal, _ := w.Balance(from)
+			if fromBal > 0 {
+				amount := 1 + rng.IntN(min(fromBal, 1000))
+				w.Transfer(from, to, amount)
+			}
+		}
+		w.Close()
+		os.Remove(path)
+	}
 }

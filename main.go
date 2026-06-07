@@ -22,6 +22,7 @@ type FileWAL struct {
 	mu      sync.Mutex
 	file    *os.File
 	bw      *bufio.Writer
+	enc     *json.Encoder
 	next    int
 	entries []Value
 }
@@ -40,7 +41,8 @@ func NewFileWAL(path string) (*FileWAL, error) {
 		return nil, err
 	}
 	fw.file = f
-	fw.bw = bufio.NewWriter(f)
+	fw.bw = bufio.NewWriterSize(f, 256*1024)
+	fw.enc = json.NewEncoder(fw.bw)
 	return fw, nil
 }
 
@@ -49,13 +51,7 @@ func (fw *FileWAL) Append(t string, data map[string]string) (Value, error) {
 	defer fw.mu.Unlock()
 
 	v := Value{ID: fw.next, Type: t, Data: data}
-
-	b, err := json.Marshal(v)
-	if err != nil {
-		return Value{}, err
-	}
-	b = append(b, '\n')
-	if _, err := fw.bw.Write(b); err != nil {
+	if err := fw.enc.Encode(v); err != nil {
 		return Value{}, err
 	}
 
