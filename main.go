@@ -140,7 +140,7 @@ type FileWAL struct {
 }
 
 func NewFileWAL(path string) (*FileWAL, error) {
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_RDWR, 0644)
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		return nil, err
 	}
@@ -153,21 +153,24 @@ func NewFileWAL(path string) (*FileWAL, error) {
 	return fw, nil
 }
 
-func (fw *FileWAL) Append(t string, data map[string]string) Value {
+func (fw *FileWAL) Append(t string, data map[string]string) (Value, error) {
 	fw.mu.Lock()
 	defer fw.mu.Unlock()
 
 	v := Value{ID: fw.next, Type: t, Data: data}
-	fw.next++
-	fw.entries = append(fw.entries, v)
 
 	parts := []string{strconv.Itoa(v.ID), v.Type}
 	for k, vv := range v.Data {
 		parts = append(parts, k+"="+vv)
 	}
 	line := strings.Join(parts, "|") + "\n"
-	fw.file.WriteString(line)
-	return v
+	if _, err := fw.file.WriteString(line); err != nil {
+		return Value{}, err
+	}
+
+	fw.next++
+	fw.entries = append(fw.entries, v)
+	return v, nil
 }
 
 // Sync flushes buffered writes to disk.
