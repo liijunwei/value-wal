@@ -1,45 +1,26 @@
-=== Value-WAL: Hickey's 'Value of Values' in Practice ===
+=== Value-WAL: append-only, immutable facts ===
 
---- Demo 1: In-memory WAL, independent consumers ---
-Producer: appending facts to the WAL...
-WAL has 6 immutable entries
+WAL has 7 entries in /tmp/value-wal-demo.log:
+  {"id":1,"type":"open","data":{"owner":"alice"}}
+  {"id":2,"type":"open","data":{"owner":"bob"}}
+  {"id":3,"type":"deposit","data":{"amount":"1000","owner":"alice"}}
+  {"id":4,"type":"deposit","data":{"amount":"500","owner":"bob"}}
+  {"id":5,"type":"transfer","data":{"amount":"300","from":"alice","to":"bob"}}
+  {"id":6,"type":"withdraw","data":{"amount":"200","owner":"alice"}}
+  {"id":7,"type":"deposit","data":{"amount":"150","owner":"bob"}}
 
-  audit-service consumed 6 events from offset 0
-    {"id":1,"type":"open","data":{"owner":"alice"}}
-    {"id":2,"type":"open","data":{"owner":"bob"}}
-    {"id":3,"type":"deposit","data":{"amount":"1000","owner":"alice"}}
-    {"id":4,"type":"deposit","data":{"amount":"500","owner":"bob"}}
-    {"id":5,"type":"transfer","data":{"amount":"300","from":"alice","to":"bob"}}
-    {"id":6,"type":"withdraw","data":{"amount":"200","owner":"alice"}}
+Current state (all 7 facts):
+  {"owner":"alice","balance":500}
+  {"owner":"bob","balance":950}
 
-  notification-service consumed first 2, paused at offset 6
+Historical state (first 5 facts only):
+  {"owner":"alice","balance":700}
+  {"owner":"bob","balance":800}
 
-Producer: more facts...
-  notification-service resumed, caught up: 1 more events
-    {"id":7,"type":"deposit","data":{"amount":"150","owner":"bob"}}
-
-  audit-service got 1 new event(s)
-
-  state = f(log): deriving bank accounts from WAL replay...
-    {"owner":"alice","balance":500}
-    {"owner":"bob","balance":950}
-
-  historical state (first 5 facts only):
-    {"owner":"alice","balance":700}
-    {"owner":"bob","balance":800}
-
---- Demo 2: Persistent file WAL (append-only, same as in-memory) ---
-  Wrote 3 entries to /tmp/value-wal-demo.log
-  File contains 3 entries:
-    {"id":1,"type":"open","data":{"owner":"carol"}}
-    {"id":2,"type":"deposit","data":{"amount":"5000","owner":"carol"}}
-    {"id":3,"type":"withdraw","data":{"amount":"1200","owner":"carol"}}
-
-  Reopened after 'crash': 3 entries recovered
+Reopened after crash: 7 entries recovered
 
 Takeaway:
-  - WAL stores immutable facts (values), never mutates
-  - Consumers have independent offsets, decoupled from producer
+  - WAL stores immutable facts, never mutates
   - State is derived by replaying the log: state = f(log)
   - Point-in-time is free: replay a prefix for historical state
-  - Persistence is just an append-only file — no broker needed
+  - Persistence is just an append-only NDJSON file
