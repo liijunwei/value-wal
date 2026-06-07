@@ -18,6 +18,13 @@ const (
 	transferCap  = 1000
 )
 
+type userResult struct {
+	name    string
+	initial int
+	final   int
+	active  bool
+}
+
 func TestSimulation(t *testing.T) {
 	path := "sim-wal.jsonl"
 	os.Remove(path)
@@ -34,6 +41,7 @@ func TestSimulation(t *testing.T) {
 	activeList := make([]string, 0, numUsers)
 	activeSet := make(map[string]bool, numUsers)
 	inactive := make(map[string]bool)
+	initialCap := make(map[string]int, numUsers)
 
 	for i := 0; i < numUsers; i++ {
 		name := "u" + strconv.Itoa(i)
@@ -42,10 +50,12 @@ func TestSimulation(t *testing.T) {
 		assert(w.Transfer("exchange", name, cap) == nil, "initial fund transfer")
 		activeList = append(activeList, name)
 		activeSet[name] = true
+		initialCap[name] = cap
 	}
 
 	success := 0
 	fail := 0
+	allIn := 0
 	var joinSeq []string
 
 	rng := rand.New(rand.NewPCG(42, 0))
@@ -59,6 +69,7 @@ func TestSimulation(t *testing.T) {
 			assert(w.Transfer("exchange", name, cap) == nil, "mid-join fund")
 			activeList = append(activeList, name)
 			activeSet[name] = true
+			initialCap[name] = cap
 		}
 
 		// 离场: swap-delete
@@ -89,6 +100,9 @@ func TestSimulation(t *testing.T) {
 			continue
 		}
 		amount := 1 + rng.IntN(min(fromBal, transferCap))
+		if amount == fromBal {
+			allIn++
+		}
 		if err := w.Transfer(from, to, amount); err != nil {
 			fail++
 		} else {
@@ -99,44 +113,77 @@ func TestSimulation(t *testing.T) {
 	exBal, ok := w.Balance("exchange")
 	assert(ok, "exchange balance")
 
-	var actBals, inactBals []int
+	// 收集各用户最终余额与涨跌
+	var results []userResult
 	for name := range activeSet {
 		bal, ok := w.Balance(name)
 		assert(ok, "active balance lookup")
-		actBals = append(actBals, bal)
+		results = append(results, userResult{name, initialCap[name], bal, true})
 	}
 	for name := range inactive {
 		bal, ok := w.Balance(name)
 		assert(ok, "inactive balance lookup")
-		inactBals = append(inactBals, bal)
+		results = append(results, userResult{name, initialCap[name], bal, false})
 	}
-	sort.Ints(actBals)
-	sort.Ints(inactBals)
 
-	total := exBal
-	for _, b := range actBals {
-		total += b
-	}
-	for _, b := range inactBals {
-		total += b
+	// 统计涨跌
+	gainCount, lossCount, evenCount := 0, 0, 0
+	totalInitial := 0
+	totalFinal := exBal
+	var allInUsers []userResult
+	for _, r := range results {
+		totalInitial += r.initial
+		totalFinal += r.final
+		if r.final > r.initial {
+			gainCount++
+		} else if r.final < r.initial {
+			lossCount++
+		} else {
+			evenCount++
+		}
+		if r.final == 0 {
+			allInUsers = append(allInUsers, r)
+		}
 	}
 
 	fmt.Println("=== 交易所模拟报告 ===")
-	fmt.Printf("交易轮数: %d (成功 %d, 失败 %d)\n", totalRounds, success, fail)
+	fmt.Printf("交易轮数: %d (成功 %d, 失败 %d, 梭哈 %d)\n", totalRounds, success, fail, allIn)
 	fmt.Printf("总用户: active=%d, inactive=%d, 中途入场=%d\n", len(activeSet), len(inactive), len(joinSeq))
 	fmt.Println()
-	fmt.Printf("资金守恒: exchange_init=%d, current_sum=%d, diff=%d\n", exchangeInit, total, total-exchangeInit)
+	fmt.Printf("资金守恒: exchange_init=%d, current_sum=%d, diff=%d\n", exchangeInit, totalFinal, totalFinal-exchangeInit)
 	fmt.Println()
 	fmt.Printf("交易所余额: %d\n", exBal)
 	fmt.Println()
+	fmt.Printf("用户初始资金总计: %d\n", totalInitial)
+	fmt.Printf("用户最终余额总计: %d (涨跌: %+d, %.2f%%)\n",
+		totalFinal-exBal, totalFinal-exBal-totalInitial,
+		float64(totalFinal-exBal-totalInitial)/float64(totalInitial)*100)
+	fmt.Println()
+	fmt.Printf("用户涨跌分布: 赚=%d, 亏=%d, 持平=%d\n", gainCount, lossCount, evenCount)
+	fmt.Println()
 	fmt.Println("活跃用户余额分布:")
-	printDistrib(actBals)
+	printBalDistrib(results, func(r userResult) bool { return r.active })
 	fmt.Println()
 	fmt.Println("离场用户余额分布:")
-	printDistrib(inactBals)
+	printBalDistrib(results, func(r userResult) bool { return !r.active })
+	fmt.Println()
+	// 梭哈用户
+	fmt.Printf("梭哈用户 (余额归零): %d 人\n", len(allInUsers))
+	if len(allInUsers) > 0 {
+		var initials []int
+		sumInit := 0
+		for _, r := range allInUsers {
+			initials = append(initials, r.initial)
+			sumInit += r.initial
+		}
+		sort.Ints(initials)
+		fmt.Printf("  他们带入的总资金: %d, 人均初始: %d\n", sumInit, sumInit/len(allInUsers))
+		fmt.Printf("  初始资金分布: min=%d p50=%d max=%d\n",
+			initials[0], initials[len(initials)/2], initials[len(initials)-1])
+	}
 
-	if total != exchangeInit {
-		t.Errorf("资金不守恒: %d != %d", total, exchangeInit)
+	if totalFinal != exchangeInit {
+		t.Errorf("资金不守恒: %d != %d", totalFinal, exchangeInit)
 	}
 
 	allBefore := w.Balances()
@@ -168,18 +215,23 @@ func activeKeys(m map[string]bool) []string {
 	return keys
 }
 
-func printDistrib(bals []int) {
+func printBalDistrib(results []userResult, filter func(userResult) bool) {
+	var bals []int
+	var sum int
+	for _, r := range results {
+		if filter(r) {
+			bals = append(bals, r.final)
+			sum += r.final
+		}
+	}
 	if len(bals) == 0 {
 		fmt.Println("  (无数据)")
 		return
 	}
+	sort.Ints(bals)
 	p := func(frac float64) int {
 		idx := int(frac * float64(len(bals)-1))
 		return bals[idx]
-	}
-	sum := 0
-	for _, b := range bals {
-		sum += b
 	}
 	fmt.Printf("  count=%d  sum=%d  min=%d  p25=%d  p50=%d  p75=%d  p95=%d  p99=%d  max=%d\n",
 		len(bals), sum, bals[0], p(0.25), p(0.50), p(0.75), p(0.95), p(0.99), bals[len(bals)-1])
