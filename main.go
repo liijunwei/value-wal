@@ -150,7 +150,7 @@ func assert(ok bool, msg string) {
 }
 
 func main() {
-	path := "/tmp/value-wal-demo.log"
+	path := "value-wal.jsonl"
 	os.Remove(path)
 
 	fw, err := NewFileWAL(path)

@@ -1,3 +1,5 @@
 value-wal
 log/
 tmp/
+*.log
+*.jsonl
