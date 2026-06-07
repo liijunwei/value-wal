@@ -26,6 +26,13 @@ type WAL struct {
 	entries []Value
 }
 
+func NewWAL(capacity int) *WAL {
+	if capacity <= 0 {
+		capacity = 64
+	}
+	return &WAL{entries: make([]Value, 0, capacity)}
+}
+
 // Append adds an immutable fact to the log. No mutation of existing data.
 func (w *WAL) Append(t string, data map[string]string) Value {
 	w.mu.Lock()
@@ -43,14 +50,17 @@ func (w *WAL) Append(t string, data map[string]string) Value {
 // ReadFrom returns all values starting from a given offset.
 // Each consumer controls its own offset — producer doesn't know or care
 // where consumers are. Time is decoupled.
+// Returns a copy so consumers don't pin the WAL's backing array.
 func (w *WAL) ReadFrom(offset int) []Value {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
 
-	if offset > len(w.entries) {
+	if offset >= len(w.entries) {
 		return nil
 	}
-	return w.entries[offset:]
+	result := make([]Value, len(w.entries)-offset)
+	copy(result, w.entries[offset:])
+	return result
 }
 
 // Len returns total number of entries.
@@ -123,9 +133,10 @@ func deriveState(wal *WAL) map[string]*BankAccount {
 // --- Persistent WAL on disk: append-only file ---
 
 type FileWAL struct {
-	mu   sync.Mutex
-	file *os.File
-	next int
+	mu      sync.Mutex
+	file    *os.File
+	next    int
+	entries []Value // in-memory cache, same data as on disk
 }
 
 func NewFileWAL(path string) (*FileWAL, error) {
@@ -133,17 +144,13 @@ func NewFileWAL(path string) (*FileWAL, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Count existing entries so next ID is correct.
+	fw := &FileWAL{file: f, next: 1}
 	data, _ := os.ReadFile(path)
-	lines := 0
 	if len(data) > 0 {
-		for _, b := range data {
-			if b == '\n' {
-				lines++
-			}
-		}
+		fw.entries = parseEntries(string(data))
+		fw.next = len(fw.entries) + 1
 	}
-	return &FileWAL{file: f, next: lines + 1}, nil
+	return fw, nil
 }
 
 func (fw *FileWAL) Append(t string, data map[string]string) Value {
@@ -152,30 +159,38 @@ func (fw *FileWAL) Append(t string, data map[string]string) Value {
 
 	v := Value{ID: fw.next, Type: t, Data: data}
 	fw.next++
+	fw.entries = append(fw.entries, v)
 
-	// Serialize as simple line: id|type|key=val,key=val
 	parts := []string{strconv.Itoa(v.ID), v.Type}
 	for k, vv := range v.Data {
 		parts = append(parts, k+"="+vv)
 	}
 	line := strings.Join(parts, "|") + "\n"
 	fw.file.WriteString(line)
-	fw.file.Sync()
 	return v
 }
 
+// Sync flushes buffered writes to disk.
+func (fw *FileWAL) Sync() error {
+	fw.mu.Lock()
+	defer fw.mu.Unlock()
+	return fw.file.Sync()
+}
+
 func (fw *FileWAL) Close() error {
+	fw.file.Sync()
 	return fw.file.Close()
 }
 
 func (fw *FileWAL) Entries() []Value {
 	fw.mu.Lock()
 	defer fw.mu.Unlock()
+	return fw.entries
+}
 
-	fw.file.Sync()
-	data, _ := os.ReadFile(fw.file.Name())
+func parseEntries(raw string) []Value {
 	var entries []Value
-	for line := range strings.SplitSeq(strings.TrimSpace(string(data)), "\n") {
+	for line := range strings.SplitSeq(strings.TrimSpace(raw), "\n") {
 		if line == "" {
 			continue
 		}
@@ -204,7 +219,7 @@ func main() {
 
 func demo1_InMemory() {
 	fmt.Println("--- Demo 1: In-memory WAL, independent consumers ---")
-	wal := &WAL{}
+	wal := NewWAL(100)
 
 	// Producer writes facts. These are immutable values — what "happened".
 	// Nobody asks "what's the balance?" and gets a different answer each time.
