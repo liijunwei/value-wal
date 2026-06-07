@@ -21,6 +21,7 @@ type Value struct {
 type FileWAL struct {
 	mu      sync.Mutex
 	file    *os.File
+	bw      *bufio.Writer
 	next    int
 	entries []Value
 }
@@ -39,6 +40,7 @@ func NewFileWAL(path string) (*FileWAL, error) {
 		return nil, err
 	}
 	fw.file = f
+	fw.bw = bufio.NewWriter(f)
 	return fw, nil
 }
 
@@ -53,7 +55,7 @@ func (fw *FileWAL) Append(t string, data map[string]string) (Value, error) {
 		return Value{}, err
 	}
 	b = append(b, '\n')
-	if _, err := fw.file.Write(b); err != nil {
+	if _, err := fw.bw.Write(b); err != nil {
 		return Value{}, err
 	}
 
@@ -65,6 +67,9 @@ func (fw *FileWAL) Append(t string, data map[string]string) (Value, error) {
 func (fw *FileWAL) Sync() error {
 	fw.mu.Lock()
 	defer fw.mu.Unlock()
+	if err := fw.bw.Flush(); err != nil {
+		return err
+	}
 	return fw.file.Sync()
 }
 
