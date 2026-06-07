@@ -1,10 +1,11 @@
 package main
 
 import (
+	"bufio"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 )
@@ -140,16 +141,20 @@ type FileWAL struct {
 }
 
 func NewFileWAL(path string) (*FileWAL, error) {
+	fw := &FileWAL{next: 1}
+
+	// Stream existing entries line by line — never loads the full file into memory.
+	if rf, err := os.Open(path); err == nil {
+		fw.entries = parseEntriesFrom(rf)
+		rf.Close()
+		fw.next = len(fw.entries) + 1
+	}
+
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		return nil, err
 	}
-	fw := &FileWAL{file: f, next: 1}
-	data, _ := os.ReadFile(path)
-	if len(data) > 0 {
-		fw.entries = parseEntries(string(data))
-		fw.next = len(fw.entries) + 1
-	}
+	fw.file = f
 	return fw, nil
 }
 
@@ -159,12 +164,12 @@ func (fw *FileWAL) Append(t string, data map[string]string) (Value, error) {
 
 	v := Value{ID: fw.next, Type: t, Data: data}
 
-	parts := []string{strconv.Itoa(v.ID), v.Type}
-	for k, vv := range v.Data {
-		parts = append(parts, k+"="+vv)
+	b, err := json.Marshal(v)
+	if err != nil {
+		return Value{}, err
 	}
-	line := strings.Join(parts, "|") + "\n"
-	if _, err := fw.file.WriteString(line); err != nil {
+	b = append(b, '\n')
+	if _, err := fw.file.Write(b); err != nil {
 		return Value{}, err
 	}
 
@@ -181,7 +186,7 @@ func (fw *FileWAL) Sync() error {
 }
 
 func (fw *FileWAL) Close() error {
-	fw.file.Sync()
+	fw.Sync()
 	return fw.file.Close()
 }
 
@@ -191,26 +196,21 @@ func (fw *FileWAL) Entries() []Value {
 	return fw.entries
 }
 
-func parseEntries(raw string) []Value {
+func parseEntriesFrom(r *os.File) []Value {
 	var entries []Value
-	for line := range strings.SplitSeq(strings.TrimSpace(raw), "\n") {
+	scanner := bufio.NewScanner(r)
+	for scanner.Scan() {
+		line := scanner.Text()
 		if line == "" {
 			continue
 		}
-		parts := strings.Split(line, "|")
-		if len(parts) < 3 {
+		var v Value
+		if err := json.Unmarshal([]byte(line), &v); err != nil {
 			continue
 		}
-		id, _ := strconv.Atoi(parts[0])
-		typ := parts[1]
-		data := make(map[string]string)
-		for _, kv := range parts[2:] {
-			if idx := strings.Index(kv, "="); idx > 0 {
-				data[kv[:idx]] = kv[idx+1:]
-			}
-		}
-		entries = append(entries, Value{ID: id, Type: typ, Data: data})
+		entries = append(entries, v)
 	}
+	_ = scanner.Err() // partial read is acceptable; entries parsed so far are returned
 	return entries
 }
 
@@ -301,7 +301,6 @@ func demo2_DiskWAL() {
 		fmt.Println("Error:", err)
 		return
 	}
-	defer fw.Close()
 
 	// Same append-only pattern. Same immutable values.
 	// The file is just bytes — no database, no broker, no server.

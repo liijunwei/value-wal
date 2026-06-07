@@ -1,0 +1,45 @@
+=== Value-WAL: Hickey's 'Value of Values' in Practice ===
+
+--- Demo 1: In-memory WAL, independent consumers ---
+Producer: appending facts to the WAL...
+WAL has 6 immutable entries
+
+  audit-service consumed 6 events from offset 0
+    [1] open map[owner:alice]
+    [2] open map[owner:bob]
+    [3] deposit map[amount:1000 owner:alice]
+    [4] deposit map[amount:500 owner:bob]
+    [5] transfer map[amount:300 from:alice to:bob]
+    [6] withdraw map[amount:200 owner:alice]
+
+  notification-service consumed first 2, paused at offset 6
+
+Producer: more facts...
+  notification-service resumed, caught up: 1 more events
+    [7] deposit map[amount:150 owner:bob]
+
+  audit-service got 1 new event(s)
+
+  state = f(log): deriving bank accounts from WAL replay...
+    alice: balance = 500
+    bob: balance = 950
+
+  historical state (first 5 facts only):
+    alice: balance = 700
+    bob: balance = 800
+
+--- Demo 2: Persistent file WAL (append-only, same as in-memory) ---
+  Wrote 3 entries to /tmp/value-wal-demo.log
+  File contains 3 entries:
+    [1] open map[owner:carol]
+    [2] deposit map[amount:5000 owner:carol]
+    [3] withdraw map[amount:1200 owner:carol]
+
+  Reopened after 'crash': 3 entries recovered
+
+Takeaway:
+  - WAL stores immutable facts (values), never mutates
+  - Consumers have independent offsets, decoupled from producer
+  - State is derived by replaying the log: state = f(log)
+  - Point-in-time is free: replay a prefix for historical state
+  - Persistence is just an append-only file — no broker needed
