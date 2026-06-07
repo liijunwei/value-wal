@@ -73,8 +73,8 @@ func TestSimulation(t *testing.T) {
 		}
 
 		// 离场: swap-delete
-		if round > 0 && round%1000 == 0 {
-			nLeave := 1 + rng.IntN(5)
+		if round > 0 && round%200 == 0 {
+			nLeave := 2 + rng.IntN(7)
 			if len(activeList) > nLeave+10 {
 				for k := 0; k < nLeave; k++ {
 					i := rng.IntN(len(activeList))
