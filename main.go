@@ -12,15 +12,14 @@ import (
 	"sync"
 )
 
-// A Value is an immutable fact. It never changes once written.
+// Value is an immutable record written to the WAL.
 type Value struct {
 	ID   int               `json:"id"`
 	Type string            `json:"type"`
 	Data map[string]string `json:"data"`
 }
 
-// --- Persistent WAL on disk: append-only file ---
-
+// FileWAL is an append-only write-ahead log backed by an NDJSON file.
 type FileWAL struct {
 	mu      sync.Mutex
 	file    *os.File
@@ -102,8 +101,6 @@ func parseEntriesFrom(r *os.File) []Value {
 	return entries
 }
 
-// --- State is DERIVED by replaying the WAL entries ---
-
 type BankAccount struct {
 	Owner   string `json:"owner"`
 	Balance int    `json:"balance"`
@@ -163,9 +160,6 @@ func main() {
 		return
 	}
 
-	fmt.Println("=== Value-WAL: append-only, immutable facts ===")
-
-	// Append facts — these are immutable values.
 	fw.Append("open", map[string]string{"owner": "alice"})
 	fw.Append("open", map[string]string{"owner": "bob"})
 	fw.Append("deposit", map[string]string{"owner": "alice", "amount": "1000"})
@@ -182,7 +176,6 @@ func main() {
 		fmt.Printf("  %s\n", b)
 	}
 
-	// State is derived by replaying the log: state = f(log).
 	fmt.Println("Current state (all 7 facts):")
 	for _, acc := range deriveState(entries) {
 		b, err := json.Marshal(acc)
@@ -190,7 +183,6 @@ func main() {
 		fmt.Printf("  %s\n", b)
 	}
 
-	// Point-in-time: replay only a prefix for historical state.
 	fmt.Println("Historical state (first 5 facts only):")
 	for _, acc := range deriveState(entries[:5]) {
 		b, err := json.Marshal(acc)
@@ -198,16 +190,9 @@ func main() {
 		fmt.Printf("  %s\n", b)
 	}
 
-	// Crash recovery: reopen the file, data survives.
 	fw.Close()
 
 	fw2, _ := NewFileWAL(path)
 	defer fw2.Close()
-	fmt.Printf("\nReopened after crash: %d entries recovered\n", len(fw2.Entries()))
-
-	fmt.Println("Takeaway:")
-	fmt.Println("  - WAL stores immutable facts, never mutates")
-	fmt.Println("  - State is derived by replaying the log: state = f(log)")
-	fmt.Println("  - Point-in-time is free: replay a prefix for historical state")
-	fmt.Println("  - Persistence is just an append-only NDJSON file")
+	fmt.Printf("\nReopened: %d entries recovered\n", len(fw2.Entries()))
 }

@@ -1,4 +1,3 @@
-=== Value-WAL: append-only, immutable facts ===
 WAL has 7 entries in value-wal.jsonl:
   {"id":1,"type":"open","data":{"owner":"alice"}}
   {"id":2,"type":"open","data":{"owner":"bob"}}
@@ -14,9 +13,4 @@ Historical state (first 5 facts only):
   {"owner":"alice","balance":700}
   {"owner":"bob","balance":800}
 
-Reopened after crash: 7 entries recovered
-Takeaway:
-  - WAL stores immutable facts, never mutates
-  - State is derived by replaying the log: state = f(log)
-  - Point-in-time is free: replay a prefix for historical state
-  - Persistence is just an append-only NDJSON file
+Reopened: 7 entries recovered
