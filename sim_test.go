@@ -56,6 +56,7 @@ func TestSimulation(t *testing.T) {
 	success := 0
 	fail := 0
 	allIn := 0
+	allInSet := make(map[string]bool)
 	var joinSeq []string
 
 	rng := rand.New(rand.NewPCG(42, 0))
@@ -104,6 +105,7 @@ func TestSimulation(t *testing.T) {
 			amount := 1 + rng.IntN(min(fromBal, transferCap))
 			if amount == fromBal {
 				allIn++
+				allInSet[from] = true
 			}
 			if err := w.Transfer(from, to, amount); err != nil {
 				fail++
@@ -133,7 +135,6 @@ func TestSimulation(t *testing.T) {
 	gainCount, lossCount, evenCount := 0, 0, 0
 	totalInitial := 0
 	totalFinal := exBal
-	var allInUsers []userResult
 	for _, r := range results {
 		totalInitial += r.initial
 		totalFinal += r.final
@@ -143,9 +144,6 @@ func TestSimulation(t *testing.T) {
 			lossCount++
 		} else {
 			evenCount++
-		}
-		if r.final == 0 {
-			allInUsers = append(allInUsers, r)
 		}
 	}
 
@@ -170,19 +168,47 @@ func TestSimulation(t *testing.T) {
 	fmt.Println("离场用户余额分布:")
 	printBalDistrib(results, func(r userResult) bool { return !r.active })
 	fmt.Println()
-	// 梭哈用户
-	fmt.Printf("梭哈用户 (余额归零): %d 人\n", len(allInUsers))
-	if len(allInUsers) > 0 {
+	// 梭哈用户（至少一次转账清空余额）
+	var allInProfit, allInLoss, allInBroke int
+	var allInProfitUsers, allInLossUsers, allInBrokeUsers []userResult
+	for _, r := range results {
+		if allInSet[r.name] {
+			if r.final == 0 {
+				allInBroke++
+				allInBrokeUsers = append(allInBrokeUsers, r)
+			} else if r.final > r.initial {
+				allInProfit++
+				allInProfitUsers = append(allInProfitUsers, r)
+			} else {
+				allInLoss++
+				allInLossUsers = append(allInLossUsers, r)
+			}
+		}
+	}
+	fmt.Printf("梭哈用户: %d 人（至少一次转账清空余额）\n", len(allInSet))
+	fmt.Printf("  翻身盈利: %d 人\n", allInProfit)
+	if len(allInProfitUsers) > 0 {
+		sort.Slice(allInProfitUsers, func(i, j int) bool { return allInProfitUsers[i].final-allInProfitUsers[i].initial > allInProfitUsers[j].final-allInProfitUsers[j].initial })
+		p := allInProfitUsers[len(allInProfitUsers)/2]
+		fmt.Printf("    中位盈利: +%d\n", p.final-p.initial)
+	}
+	fmt.Printf("  亏损未归零: %d 人\n", allInLoss)
+	if len(allInLossUsers) > 0 {
+		sort.Slice(allInLossUsers, func(i, j int) bool { return allInLossUsers[i].final-allInLossUsers[i].initial > allInLossUsers[j].final-allInLossUsers[j].initial })
+		p := allInLossUsers[len(allInLossUsers)/2]
+		fmt.Printf("    中位亏损: %d\n", p.final-p.initial)
+	}
+	fmt.Printf("  最终归零: %d 人\n", allInBroke)
+	if len(allInBrokeUsers) > 0 {
 		var initials []int
 		sumInit := 0
-		for _, r := range allInUsers {
+		for _, r := range allInBrokeUsers {
 			initials = append(initials, r.initial)
 			sumInit += r.initial
 		}
 		sort.Ints(initials)
-		fmt.Printf("  他们带入的总资金: %d, 人均初始: %d\n", sumInit, sumInit/len(allInUsers))
-		fmt.Printf("  初始资金分布: min=%d p50=%d max=%d\n",
-			initials[0], initials[len(initials)/2], initials[len(initials)-1])
+		fmt.Printf("    带入资金: %d, 人均: %d, min=%d p50=%d max=%d\n",
+			sumInit, sumInit/len(allInBrokeUsers), initials[0], initials[len(initials)/2], initials[len(initials)-1])
 	}
 
 	if totalFinal != exchangeInit {
