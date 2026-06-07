@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sort"
 	"strconv"
 	"sync"
 	"time"
@@ -103,7 +104,7 @@ type BankAccount struct {
 // State is a function of the log: state = f(log).
 // You don't ask "what's the balance right now?" (mutable place).
 // You compute it from immutable facts.
-func deriveState(wal *WAL) map[string]*BankAccount {
+func deriveState(wal *WAL) []*BankAccount {
 	wal.mu.RLock()
 	defer wal.mu.RUnlock()
 
@@ -131,7 +132,17 @@ func deriveState(wal *WAL) map[string]*BankAccount {
 			to.Balance += amount
 		}
 	}
-	return accounts
+
+	keys := make([]string, 0, len(accounts))
+	for k := range accounts {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	result := make([]*BankAccount, len(keys))
+	for i, k := range keys {
+		result[i] = accounts[k]
+	}
+	return result
 }
 
 // --- Persistent WAL on disk: append-only file ---
