@@ -61,7 +61,7 @@ func TestSimulation(t *testing.T) {
 	rng := rand.New(rand.NewPCG(42, 0))
 
 	for round := 0; round < totalRounds; round++ {
-		if round < numUsers/2 && rng.IntN(100) == 0 {
+		if rng.IntN(100) == 0 {
 			name := "u" + strconv.Itoa(numUsers+len(joinSeq))
 			joinSeq = append(joinSeq, name)
 			assert(w.Create(name) == nil, "mid-join create")
