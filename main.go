@@ -2,8 +2,10 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"sort"
 	"strconv"
@@ -82,19 +84,21 @@ func (fw *FileWAL) Entries() []Value {
 
 func parseEntriesFrom(r *os.File) []Value {
 	var entries []Value
-	scanner := bufio.NewScanner(r)
-	for scanner.Scan() {
-		line := scanner.Text()
-		if line == "" {
-			continue
+	reader := bufio.NewReader(r)
+	for {
+		line, err := reader.ReadBytes('\n')
+		if len(bytes.TrimSpace(line)) > 0 {
+			var v Value
+			assert(json.Unmarshal(line, &v) == nil, "corrupt WAL line, cannot recover")
+			entries = append(entries, v)
 		}
-		var v Value
-		if err := json.Unmarshal([]byte(line), &v); err != nil {
-			continue
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			panic(err)
 		}
-		entries = append(entries, v)
 	}
-	assert(scanner.Err() == nil, "scan WAL entries")
 	return entries
 }
 
