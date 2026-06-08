@@ -792,27 +792,11 @@ func FuzzAccountTraceability(f *testing.F) {
 		for name, actual := range w.Balances() {
 			derived := 0
 			for _, v := range w.Entries() {
-				switch v.Type {
-				case "wallet_deposit":
-					if v.Data["owner"] == name {
-						amt, _ := strconv.Atoi(v.Data["amount"])
-						derived += amt
-					}
-				case "wallet_withdraw":
-					if v.Data["owner"] == name {
-						amt, _ := strconv.Atoi(v.Data["amount"])
-						derived -= amt
-					}
-				case "wallet_transfer":
-					if v.Data["from"] == name {
-						amt, _ := strconv.Atoi(v.Data["amount"])
-						derived -= amt
-					}
-					if v.Data["to"] == name {
-						amt, _ := strconv.Atoi(v.Data["amount"])
-						derived += amt
-					}
+				delta, err := valueBalanceDelta(v, name)
+				if err != nil {
+					t.Fatalf("corrupt entry %d: %v", v.ID, err)
 				}
+				derived += delta
 			}
 			if derived != actual {
 				t.Errorf("%s: WAL-derived %d != ledger %d", name, derived, actual)

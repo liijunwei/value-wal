@@ -39,20 +39,75 @@ func NewLedgerWithWAL(wal WAL) *Ledger {
 	return l
 }
 
+// --- pure functions on Value ---
+
+// valueInvolves returns true if the WAL entry references owner in any role.
+func valueInvolves(v Value, owner string) bool {
+	switch v.Type {
+	case "wallet_create", "wallet_deposit", "wallet_withdraw":
+		return v.Data["owner"] == owner
+	case "wallet_transfer":
+		return v.Data["from"] == owner || v.Data["to"] == owner
+	default:
+		return false
+	}
+}
+
+// valueBalanceDelta returns the net balance change for owner caused by v.
+// Returns an error if the amount field is not a valid integer (corrupt WAL).
+func valueBalanceDelta(v Value, owner string) (int, error) {
+	switch v.Type {
+	case "wallet_deposit":
+		if v.Data["owner"] != owner {
+			return 0, nil
+		}
+		amt, err := strconv.Atoi(v.Data["amount"])
+		if err != nil {
+			return 0, fmt.Errorf("corrupt WAL entry %d: invalid amount %q", v.ID, v.Data["amount"])
+		}
+		return amt, nil
+	case "wallet_withdraw":
+		if v.Data["owner"] != owner {
+			return 0, nil
+		}
+		amt, err := strconv.Atoi(v.Data["amount"])
+		if err != nil {
+			return 0, fmt.Errorf("corrupt WAL entry %d: invalid amount %q", v.ID, v.Data["amount"])
+		}
+		return -amt, nil
+	case "wallet_transfer":
+		amt, err := strconv.Atoi(v.Data["amount"])
+		if err != nil {
+			return 0, fmt.Errorf("corrupt WAL entry %d: invalid amount %q", v.ID, v.Data["amount"])
+		}
+		if v.Data["from"] == owner {
+			return -amt, nil
+		}
+		if v.Data["to"] == owner {
+			return amt, nil
+		}
+		return 0, nil
+	default:
+		return 0, nil
+	}
+}
+
+// --- Ledger methods ---
+
 func (l *Ledger) apply(v Value) {
 	switch v.Type {
 	case "wallet_create":
 		l.balances[v.Data["owner"]] = 0
 	case "wallet_deposit":
-		amount, _ := strconv.Atoi(v.Data["amount"])
-		l.balances[v.Data["owner"]] += amount
+		amt, _ := strconv.Atoi(v.Data["amount"])
+		l.balances[v.Data["owner"]] += amt
 	case "wallet_withdraw":
-		amount, _ := strconv.Atoi(v.Data["amount"])
-		l.balances[v.Data["owner"]] -= amount
+		amt, _ := strconv.Atoi(v.Data["amount"])
+		l.balances[v.Data["owner"]] -= amt
 	case "wallet_transfer":
-		amount, _ := strconv.Atoi(v.Data["amount"])
-		l.balances[v.Data["from"]] -= amount
-		l.balances[v.Data["to"]] += amount
+		amt, _ := strconv.Atoi(v.Data["amount"])
+		l.balances[v.Data["from"]] -= amt
+		l.balances[v.Data["to"]] += amt
 	}
 }
 
@@ -178,7 +233,7 @@ func (l *Ledger) Close() error {
 	return l.wal.Close()
 }
 
-// History returns all WAL entries involving owner.
+// History returns all WAL entries involving owner, in WAL order.
 func (l *Ledger) History(owner string) ([]Value, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -189,23 +244,8 @@ func (l *Ledger) History(owner string) ([]Value, error) {
 
 	var result []Value
 	for _, v := range l.wal.Entries() {
-		switch v.Type {
-		case "wallet_create":
-			if v.Data["owner"] == owner {
-				result = append(result, v)
-			}
-		case "wallet_deposit":
-			if v.Data["owner"] == owner {
-				result = append(result, v)
-			}
-		case "wallet_withdraw":
-			if v.Data["owner"] == owner {
-				result = append(result, v)
-			}
-		case "wallet_transfer":
-			if v.Data["from"] == owner || v.Data["to"] == owner {
-				result = append(result, v)
-			}
+		if valueInvolves(v, owner) {
+			result = append(result, v)
 		}
 	}
 	return result, nil
@@ -242,35 +282,11 @@ func (l *Ledger) Audit() map[string]error {
 func (l *Ledger) verifyLocked(owner string) error {
 	derived := 0
 	for _, v := range l.wal.Entries() {
-		switch v.Type {
-		case "wallet_deposit":
-			if v.Data["owner"] == owner {
-				amt, err := strconv.Atoi(v.Data["amount"])
-				if err != nil {
-					return fmt.Errorf("corrupt WAL entry %d: invalid amount %q", v.ID, v.Data["amount"])
-				}
-				derived += amt
-			}
-		case "wallet_withdraw":
-			if v.Data["owner"] == owner {
-				amt, err := strconv.Atoi(v.Data["amount"])
-				if err != nil {
-					return fmt.Errorf("corrupt WAL entry %d: invalid amount %q", v.ID, v.Data["amount"])
-				}
-				derived -= amt
-			}
-		case "wallet_transfer":
-			amt, err := strconv.Atoi(v.Data["amount"])
-			if err != nil {
-				return fmt.Errorf("corrupt WAL entry %d: invalid amount %q", v.ID, v.Data["amount"])
-			}
-			if v.Data["from"] == owner {
-				derived -= amt
-			}
-			if v.Data["to"] == owner {
-				derived += amt
-			}
+		delta, err := valueBalanceDelta(v, owner)
+		if err != nil {
+			return err
 		}
+		derived += delta
 	}
 
 	actual := l.balances[owner]
