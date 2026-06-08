@@ -693,159 +693,132 @@ func TestConcurrentMixedOps(t *testing.T) {
 	}
 }
 
-// --- PBT: transfer 原子性 ---
+// --- Fuzz: transfer 原子性 ---
 
-func TestPropertyTransferAtomicity(t *testing.T) {
-	w, _ := openWallet(t)
+func FuzzTransferAtomicity(f *testing.F) {
+	f.Add("c a c b d a 100 t a b 50")
+	f.Add("c x c y c z d x 500 t x y 20 t z x 30 w y 5")
 
-	w.Create("bank")
-	w.Deposit("bank", 1_000_000)
+	f.Fuzz(func(t *testing.T, seed string) {
+		w, _ := openWallet(t)
+		w.Create("bank")
+		w.Deposit("bank", 1_000_000)
 
-	rng := rand.New(rand.NewPCG(55, 0))
-	for i := 0; i < 100; i++ {
-		name := fmt.Sprintf("u%d", i)
-		w.Create(name)
-		amt := 100 + rng.IntN(5000)
-		w.Transfer("bank", name, amt)
-	}
-	for i := 0; i < 500; i++ {
-		from := fmt.Sprintf("u%d", rng.IntN(100))
-		to := fmt.Sprintf("u%d", rng.IntN(100))
-		if from == to {
-			continue
-		}
-		bal, ok := w.Balance(from)
-		assert(ok, "balance from")
-		if bal > 0 {
-			amt := 1 + rng.IntN(min(bal, 1000))
-			w.Transfer(from, to, amt)
-		}
-	}
+		created := map[string]bool{"bank": true}
+		parseAndRun(t, seed, w, created)
 
-	for _, v := range w.Entries() {
-		if v.Type != "wallet_transfer" {
-			continue
-		}
-		from := v.Data["from"]
-		to := v.Data["to"]
-		amount, err := strconv.Atoi(v.Data["amount"])
-		if err != nil {
-			t.Errorf("transfer entry %d: invalid amount", v.ID)
-		}
-		if from == "" {
-			t.Errorf("transfer entry %d: missing from", v.ID)
-		}
-		if to == "" {
-			t.Errorf("transfer entry %d: missing to", v.ID)
-		}
-		if from == to {
-			t.Errorf("transfer entry %d: self-transfer from=%s to=%s", v.ID, from, to)
-		}
-		if amount <= 0 {
-			t.Errorf("transfer entry %d: non-positive amount %d", v.ID, amount)
-		}
-	}
-}
-
-// --- PBT: WAL 只追加 ---
-
-func TestPropertyWALAppendOnly(t *testing.T) {
-	w, path := openWallet(t)
-
-	w.Create("alice")
-	w.Deposit("alice", 1000)
-	c1 := len(w.Entries())
-
-	w.Create("bob")
-	w.Transfer("alice", "bob", 300)
-	c2 := len(w.Entries())
-	if c2 <= c1 {
-		t.Errorf("WAL did not grow after more operations: %d -> %d", c1, c2)
-	}
-
-	w.Withdraw("bob", 100)
-	c3 := len(w.Entries())
-	if c3 <= c2 {
-		t.Errorf("WAL did not grow after withdraw: %d -> %d", c2, c3)
-	}
-
-	w.Close()
-	w2, err := NewLedger(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer w2.Close()
-
-	c4 := len(w2.Entries())
-	if c4 != c3 {
-		t.Errorf("WAL entry count changed after reopen: %d -> %d", c3, c4)
-	}
-	for i, v := range w.Entries() {
-		v2 := w2.Entries()[i]
-		if v.ID != v2.ID || v.Type != v2.Type {
-			t.Errorf("WAL entry %d changed after reopen", i)
-		}
-	}
-}
-
-// --- PBT: 单账户可溯源 ---
-
-func TestPropertyAccountTraceability(t *testing.T) {
-	w, _ := openWallet(t)
-
-	w.Create("bank")
-	w.Deposit("bank", 500_000)
-
-	rng := rand.New(rand.NewPCG(77, 0))
-	for i := 0; i < 50; i++ {
-		name := fmt.Sprintf("u%d", i)
-		w.Create(name)
-		amt := 100 + rng.IntN(2000)
-		w.Transfer("bank", name, amt)
-	}
-	for i := 0; i < 300; i++ {
-		from := fmt.Sprintf("u%d", rng.IntN(50))
-		to := fmt.Sprintf("u%d", rng.IntN(50))
-		if from == to {
-			continue
-		}
-		bal, ok := w.Balance(from)
-		assert(ok, "balance from")
-		if bal > 0 {
-			amt := 1 + rng.IntN(min(bal, 500))
-			w.Transfer(from, to, amt)
-		}
-	}
-
-	for name, actual := range w.Balances() {
-		derived := 0
 		for _, v := range w.Entries() {
-			switch v.Type {
-			case "wallet_deposit":
-				if v.Data["owner"] == name {
-					amt, _ := strconv.Atoi(v.Data["amount"])
-					derived += amt
-				}
-			case "wallet_withdraw":
-				if v.Data["owner"] == name {
-					amt, _ := strconv.Atoi(v.Data["amount"])
-					derived -= amt
-				}
-			case "wallet_transfer":
-				if v.Data["from"] == name {
-					amt, _ := strconv.Atoi(v.Data["amount"])
-					derived -= amt
-				}
-				if v.Data["to"] == name {
-					amt, _ := strconv.Atoi(v.Data["amount"])
-					derived += amt
-				}
+			if v.Type != "wallet_transfer" {
+				continue
+			}
+			from := v.Data["from"]
+			to := v.Data["to"]
+			amount, err := strconv.Atoi(v.Data["amount"])
+			if err != nil {
+				t.Errorf("transfer entry %d: invalid amount", v.ID)
+			}
+			if from == "" {
+				t.Errorf("transfer entry %d: missing from", v.ID)
+			}
+			if to == "" {
+				t.Errorf("transfer entry %d: missing to", v.ID)
+			}
+			if from == to {
+				t.Errorf("transfer entry %d: self-transfer", v.ID)
+			}
+			if amount <= 0 {
+				t.Errorf("transfer entry %d: non-positive amount %d", v.ID, amount)
 			}
 		}
-		if derived != actual {
-			t.Errorf("%s: WAL-derived %d != ledger %d", name, derived, actual)
+	})
+}
+
+// --- Fuzz: WAL 只追加 ---
+
+func FuzzWALAppendOnly(f *testing.F) {
+	f.Add("c a c b d a 100 d b 50 t a b 20")
+
+	f.Fuzz(func(t *testing.T, seed string) {
+		path := tempPath(t)
+
+		w, err := NewLedger(path)
+		if err != nil {
+			t.Fatal(err)
 		}
-	}
+
+		w.Create("bank")
+		w.Deposit("bank", 1_000_000)
+
+		created := map[string]bool{"bank": true}
+		parseAndRun(t, seed, w, created)
+
+		entriesBefore := w.Entries()
+		countBefore := len(entriesBefore)
+
+		w.Close()
+		w2, err := NewLedger(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer w2.Close()
+
+		entriesAfter := w2.Entries()
+		if len(entriesAfter) != countBefore {
+			t.Fatalf("entry count changed after reopen: %d -> %d", countBefore, len(entriesAfter))
+		}
+		for i, v := range entriesBefore {
+			v2 := entriesAfter[i]
+			if v.ID != v2.ID || v.Type != v2.Type {
+				t.Errorf("WAL entry %d changed after reopen", i)
+			}
+		}
+	})
+}
+
+// --- Fuzz: 单账户可溯源 ---
+
+func FuzzAccountTraceability(f *testing.F) {
+	f.Add("c a c b d a 100 d b 50 t a b 20 w a 30")
+	f.Add("c x c y c z d x 500 t x y 100 t z x 200 w z 50")
+
+	f.Fuzz(func(t *testing.T, seed string) {
+		w, _ := openWallet(t)
+		w.Create("bank")
+		w.Deposit("bank", 1_000_000)
+
+		created := map[string]bool{"bank": true}
+		parseAndRun(t, seed, w, created)
+
+		for name, actual := range w.Balances() {
+			derived := 0
+			for _, v := range w.Entries() {
+				switch v.Type {
+				case "wallet_deposit":
+					if v.Data["owner"] == name {
+						amt, _ := strconv.Atoi(v.Data["amount"])
+						derived += amt
+					}
+				case "wallet_withdraw":
+					if v.Data["owner"] == name {
+						amt, _ := strconv.Atoi(v.Data["amount"])
+						derived -= amt
+					}
+				case "wallet_transfer":
+					if v.Data["from"] == name {
+						amt, _ := strconv.Atoi(v.Data["amount"])
+						derived -= amt
+					}
+					if v.Data["to"] == name {
+						amt, _ := strconv.Atoi(v.Data["amount"])
+						derived += amt
+					}
+				}
+			}
+			if derived != actual {
+				t.Errorf("%s: WAL-derived %d != ledger %d", name, derived, actual)
+			}
+		}
+	})
 }
 
 // --- PBT: 并发安全 ---
@@ -870,7 +843,6 @@ func TestPropertyConcurrentSafety(t *testing.T) {
 	}
 	wg.Wait()
 
-	// 交叉转账
 	rng := rand.New(rand.NewPCG(99, 0))
 	for i := 0; i < 200; i++ {
 		wg.Add(1)
@@ -891,7 +863,6 @@ func TestPropertyConcurrentSafety(t *testing.T) {
 	}
 	wg.Wait()
 
-	// 验证不变式
 	sum := 0
 	for _, bal := range w.Balances() {
 		if bal < 0 {
@@ -901,5 +872,59 @@ func TestPropertyConcurrentSafety(t *testing.T) {
 	}
 	if sum != 1_000_000 {
 		t.Errorf("conservation broken: sum=%d, expected=%d", sum, 1_000_000)
+	}
+}
+
+func parseAndRun(t *testing.T, seed string, w *Ledger, created map[string]bool) {
+	t.Helper()
+	for _, line := range strings.Split(seed, " ") {
+		parts := strings.Split(line, " ")
+		if len(parts) < 2 {
+			continue
+		}
+		switch parts[0] {
+		case "c":
+			owner := parts[1]
+			if !created[owner] {
+				w.Create(owner)
+				created[owner] = true
+			}
+		case "d":
+			if len(parts) < 3 {
+				continue
+			}
+			owner := parts[1]
+			amount, err := strconv.Atoi(parts[2])
+			if err != nil || amount <= 0 || !created[owner] {
+				continue
+			}
+			w.Deposit(owner, amount)
+		case "w":
+			if len(parts) < 3 {
+				continue
+			}
+			owner := parts[1]
+			amount, err := strconv.Atoi(parts[2])
+			if err != nil || amount <= 0 || !created[owner] {
+				continue
+			}
+			bal, ok := w.Balance(owner)
+			if ok && bal >= amount {
+				w.Withdraw(owner, amount)
+			}
+		case "t":
+			if len(parts) < 4 {
+				continue
+			}
+			from, to := parts[1], parts[2]
+			amount, err := strconv.Atoi(parts[3])
+			if err != nil || amount <= 0 || from == to || !created[from] || !created[to] {
+				continue
+			}
+			bal, ok := w.Balance(from)
+			if ok && bal >= amount {
+				w.Transfer(from, to, amount)
+			}
+		}
 	}
 }

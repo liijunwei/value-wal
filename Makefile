@@ -5,7 +5,7 @@
 
 .DEFAULT_GOAL := help
 
-.PHONY: help test test-sim test-pbt fuzz fuzz-crash bench cover run
+.PHONY: help test test-sim test-pbt fuzz fuzz-all bench cover run
 
 help: ## 显示帮助
 	@echo "targets:"
@@ -24,8 +24,24 @@ test-pbt: ## 资金守恒 PBT（5000 次随机操作，每步校验不变式）
 fuzz: ## 模糊测试（随机命令序列，30 秒）
 	go test -run='^$$' -fuzz=FuzzSimulation -fuzztime=30s -timeout 60s .
 
-fuzz-crash: ## 崩溃恢复模糊测试
+fuzz-crash: ## 模糊测试（崩溃恢复，30 秒）
 	go test -run='^$$' -fuzz=FuzzCrashRecovery -fuzztime=30s -timeout 60s .
+
+fuzz-atomic: ## 模糊测试（transfer 原子性，30 秒）
+	go test -run='^$$' -fuzz=FuzzTransferAtomicity -fuzztime=30s -timeout 60s .
+
+fuzz-append: ## 模糊测试（WAL 只追加，30 秒）
+	go test -run='^$$' -fuzz=FuzzWALAppendOnly -fuzztime=30s -timeout 60s .
+
+fuzz-trace: ## 模糊测试（单账户可溯源，30 秒）
+	go test -run='^$$' -fuzz=FuzzAccountTraceability -fuzztime=30s -timeout 60s .
+
+fuzz-all: ## 模糊测试（全部 5 个，各 10 秒）
+	go test -run='^$$' -fuzz=FuzzSimulation -fuzztime=10s -timeout 120s .
+	go test -run='^$$' -fuzz=FuzzCrashRecovery -fuzztime=10s -timeout 120s .
+	go test -run='^$$' -fuzz=FuzzTransferAtomicity -fuzztime=10s -timeout 120s .
+	go test -run='^$$' -fuzz=FuzzWALAppendOnly -fuzztime=10s -timeout 120s .
+	go test -run='^$$' -fuzz=FuzzAccountTraceability -fuzztime=10s -timeout 120s .
 
 bench: ## 基准测试
 	go test -run='^$$' -bench=. -benchtime=3s -timeout 120s .
