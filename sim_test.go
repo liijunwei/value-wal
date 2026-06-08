@@ -28,7 +28,7 @@ type userResult struct {
 func TestSimulation(t *testing.T) {
 	path := "sim-wal.jsonl"
 	os.Remove(path)
-	w, err := NewWallet(path)
+	w, err := NewLedger(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -218,7 +218,7 @@ func TestSimulation(t *testing.T) {
 	allBefore := w.Balances()
 	w.Close()
 
-	w2, err := NewWallet(path)
+	w2, err := NewLedger(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -273,7 +273,7 @@ func TestSimPropertySum(t *testing.T) {
 	os.Remove(path)
 	defer os.Remove(path)
 
-	w, err := NewWallet(path)
+	w, err := NewLedger(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -363,7 +363,7 @@ func FuzzSimulation(f *testing.F) {
 		os.Remove(path)
 		defer os.Remove(path)
 
-		w, err := NewWallet(path)
+		w, err := NewLedger(path)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -467,7 +467,7 @@ func BenchmarkSimulation(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		path := "sim-bench-wal.jsonl"
 		os.Remove(path)
-		w, err := NewWallet(path)
+		w, err := NewLedger(path)
 		assert(err == nil, "bench new wallet")
 		assert(w.Create("exchange") == nil, "bench create exchange")
 		assert(w.Deposit("exchange", exchangeInit) == nil, "bench fund exchange")

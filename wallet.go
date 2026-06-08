@@ -6,19 +6,19 @@ import (
 	"sync"
 )
 
-type Wallet struct {
+type Ledger struct {
 	mu       sync.Mutex
 	wal      *FileWAL
 	balances map[string]int
 }
 
-func NewWallet(path string) (*Wallet, error) {
+func NewLedger(path string) (*Ledger, error) {
 	fw, err := NewFileWAL(path)
 	if err != nil {
 		return nil, err
 	}
 
-	w := &Wallet{
+	w := &Ledger{
 		wal:      fw,
 		balances: make(map[string]int),
 	}
@@ -29,7 +29,7 @@ func NewWallet(path string) (*Wallet, error) {
 	return w, nil
 }
 
-func (w *Wallet) apply(v Value) {
+func (w *Ledger) apply(v Value) {
 	switch v.Type {
 	case "wallet_create":
 		w.balances[v.Data["owner"]] = 0
@@ -46,7 +46,7 @@ func (w *Wallet) apply(v Value) {
 	}
 }
 
-func (w *Wallet) Create(owner string) error {
+func (w *Ledger) Create(owner string) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
@@ -62,7 +62,7 @@ func (w *Wallet) Create(owner string) error {
 	return nil
 }
 
-func (w *Wallet) Deposit(owner string, amount int) error {
+func (w *Ledger) Deposit(owner string, amount int) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
@@ -84,7 +84,7 @@ func (w *Wallet) Deposit(owner string, amount int) error {
 	return nil
 }
 
-func (w *Wallet) Withdraw(owner string, amount int) error {
+func (w *Ledger) Withdraw(owner string, amount int) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
@@ -110,7 +110,7 @@ func (w *Wallet) Withdraw(owner string, amount int) error {
 	return nil
 }
 
-func (w *Wallet) Transfer(from, to string, amount int) error {
+func (w *Ledger) Transfer(from, to string, amount int) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
@@ -143,14 +143,14 @@ func (w *Wallet) Transfer(from, to string, amount int) error {
 	return nil
 }
 
-func (w *Wallet) Balance(owner string) (int, bool) {
+func (w *Ledger) Balance(owner string) (int, bool) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	bal, ok := w.balances[owner]
 	return bal, ok
 }
 
-func (w *Wallet) Balances() map[string]int {
+func (w *Ledger) Balances() map[string]int {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	out := make(map[string]int, len(w.balances))
@@ -160,6 +160,6 @@ func (w *Wallet) Balances() map[string]int {
 	return out
 }
 
-func (w *Wallet) Close() error {
+func (w *Ledger) Close() error {
 	return w.wal.Close()
 }

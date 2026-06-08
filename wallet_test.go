@@ -22,10 +22,10 @@ func tempPath(t *testing.T) string {
 	return path
 }
 
-func openWallet(t *testing.T) (*Wallet, string) {
+func openWallet(t *testing.T) (*Ledger, string) {
 	t.Helper()
 	path := tempPath(t)
-	w, err := NewWallet(path)
+	w, err := NewLedger(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,7 +165,7 @@ func TestCrashRecovery(t *testing.T) {
 	path := tempPath(t)
 
 	func() {
-		w, err := NewWallet(path)
+		w, err := NewLedger(path)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -180,7 +180,7 @@ func TestCrashRecovery(t *testing.T) {
 	}()
 
 	// reopen
-	w2, err := NewWallet(path)
+	w2, err := NewLedger(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -399,7 +399,7 @@ func TestLargeAmount(t *testing.T) {
 
 func TestReopenEmptyWAL(t *testing.T) {
 	path := tempPath(t)
-	w, err := NewWallet(path)
+	w, err := NewLedger(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -560,7 +560,7 @@ func FuzzCrashRecovery(f *testing.F) {
 
 		// first session
 		func() {
-			w, err := NewWallet(path)
+			w, err := NewLedger(path)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -613,7 +613,7 @@ func FuzzCrashRecovery(f *testing.F) {
 		}()
 
 		// reopen: state must match
-		w2, err := NewWallet(path)
+		w2, err := NewLedger(path)
 		if err != nil {
 			t.Fatal(err)
 		}

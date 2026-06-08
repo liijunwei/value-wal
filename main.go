@@ -108,7 +108,7 @@ func main() {
 	path := "wallet.jsonl"
 	os.Remove(path)
 
-	w, err := NewWallet(path)
+	w, err := NewLedger(path)
 	if err != nil {
 		fmt.Println("Error:", err)
 		return
@@ -145,7 +145,7 @@ func main() {
 
 	// 崩溃恢复
 	w.Close()
-	w2, err := NewWallet(path)
+	w2, err := NewLedger(path)
 	assert(err == nil, "reopen wallet after close")
 	defer w2.Close()
 	fmt.Println("\nafter reopen:")
