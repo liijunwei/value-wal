@@ -928,3 +928,142 @@ func parseAndRun(t *testing.T, seed string, w *Ledger, created map[string]bool) 
 		}
 	}
 }
+
+// --- Audit tests ---
+
+func TestHistory(t *testing.T) {
+	w, _ := openWallet(t)
+	w.Create("alice")
+	w.Create("bob")
+	w.Deposit("alice", 1000)
+	w.Transfer("alice", "bob", 300)
+	w.Withdraw("bob", 50)
+
+	entries, err := w.History("alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 3 { // create, deposit, transfer
+		t.Fatalf("alice: expected 3 entries, got %d", len(entries))
+	}
+
+	entries, err = w.History("bob")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 3 { // create, transfer, withdraw
+		t.Fatalf("bob: expected 3 entries, got %d", len(entries))
+	}
+
+	_, err = w.History("nobody")
+	if err == nil {
+		t.Fatal("expected error for nonexistent owner")
+	}
+}
+
+func TestVerify(t *testing.T) {
+	w, _ := openWallet(t)
+	w.Create("alice")
+	w.Deposit("alice", 1000)
+	w.Transfer("alice", "bob", 300) // auto-creates bob? no, bob must exist first
+
+	// bob doesn't exist, so this should fail
+	if err := w.Verify("bob"); err == nil {
+		t.Fatal("expected error for nonexistent bob")
+	}
+
+	w.Create("bob")
+	w.Transfer("alice", "bob", 300)
+
+	if err := w.Verify("alice"); err != nil {
+		t.Errorf("alice verification failed: %v", err)
+	}
+	if err := w.Verify("bob"); err != nil {
+		t.Errorf("bob verification failed: %v", err)
+	}
+}
+
+func TestAudit(t *testing.T) {
+	w, _ := openWallet(t)
+
+	w.Create("bank")
+	w.Deposit("bank", 50000)
+
+	for i := 0; i < 20; i++ {
+		name := fmt.Sprintf("u%d", i)
+		w.Create(name)
+		w.Transfer("bank", name, 100+i*10)
+	}
+
+	rng := rand.New(rand.NewPCG(42, 0))
+	for i := 0; i < 100; i++ {
+		from := fmt.Sprintf("u%d", rng.IntN(20))
+		to := fmt.Sprintf("u%d", rng.IntN(20))
+		if from == to {
+			continue
+		}
+		bal, ok := w.Balance(from)
+		if !ok || bal == 0 {
+			continue
+		}
+		amt := 1 + rng.IntN(min(bal, 500))
+		w.Transfer(from, to, amt)
+	}
+
+	failures := w.Audit()
+	if len(failures) > 0 {
+		for owner, err := range failures {
+			t.Errorf("%s: %v", owner, err)
+		}
+	}
+}
+
+func TestAuditDetectsCorruption(t *testing.T) {
+	w, _ := openWallet(t)
+	w.Create("alice")
+	w.Deposit("alice", 1000)
+
+	failures := w.Audit()
+	if len(failures) > 0 {
+		t.Fatal("audit should be clean")
+	}
+
+	// corrupt in-memory state directly (bypass WAL)
+	w.mu.Lock()
+	w.balances["alice"] = 9999
+	w.mu.Unlock()
+
+	err := w.Verify("alice")
+	if err == nil {
+		t.Fatal("verify should detect the corruption")
+	}
+}
+
+func TestHistoryOrder(t *testing.T) {
+	w, _ := openWallet(t)
+	w.Create("alice")
+	w.Deposit("alice", 100)
+	w.Deposit("alice", 200)
+	w.Withdraw("alice", 50)
+
+	entries, err := w.History("alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 4 {
+		t.Fatalf("expected 4 entries, got %d", len(entries))
+	}
+	// entries must be in WAL order (creation order)
+	if entries[0].Type != "wallet_create" {
+		t.Error("first entry should be create")
+	}
+	if entries[1].Type != "wallet_deposit" || entries[1].Data["amount"] != "100" {
+		t.Error("second entry should be deposit 100")
+	}
+	if entries[2].Type != "wallet_deposit" || entries[2].Data["amount"] != "200" {
+		t.Error("third entry should be deposit 200")
+	}
+	if entries[3].Type != "wallet_withdraw" || entries[3].Data["amount"] != "50" {
+		t.Error("fourth entry should be withdraw 50")
+	}
+}
