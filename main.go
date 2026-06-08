@@ -143,6 +143,38 @@ func main() {
 		fmt.Printf("  %s: %d\n", owner, bal)
 	}
 
+	// 审计
+	fmt.Println("\naudit:")
+	failures := w.Audit()
+	if len(failures) == 0 {
+		fmt.Println("  all accounts verified")
+	}
+	for owner, err := range failures {
+		fmt.Printf("  %s: %v\n", owner, err)
+	}
+
+	fmt.Println("\nhistory:")
+	for _, owner := range []string{"alice", "bob"} {
+		entries, _ := w.History(owner)
+		fmt.Printf("  %s (%d entries):\n", owner, len(entries))
+		for _, v := range entries {
+			switch v.Type {
+			case "wallet_create":
+				fmt.Printf("    create\n")
+			case "wallet_deposit":
+				fmt.Printf("    deposit +%s\n", v.Data["amount"])
+			case "wallet_withdraw":
+				fmt.Printf("    withdraw -%s\n", v.Data["amount"])
+			case "wallet_transfer":
+				if v.Data["from"] == owner {
+					fmt.Printf("    transfer to %s -%s\n", v.Data["to"], v.Data["amount"])
+				} else {
+					fmt.Printf("    transfer from %s +%s\n", v.Data["from"], v.Data["amount"])
+				}
+			}
+		}
+	}
+
 	// 崩溃恢复
 	w.Close()
 	w2, err := NewLedger(path)
