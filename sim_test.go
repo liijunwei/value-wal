@@ -359,7 +359,12 @@ func FuzzSimulation(f *testing.F) {
 	f.Add("c x c y c z t x y 10 d z 200 t z x 30 w y 5")
 
 	f.Fuzz(func(t *testing.T, seed string) {
-		path := "sim-fuzz-wal.jsonl"
+		f, err := os.CreateTemp("", "sim-fuzz-*.jsonl")
+		if err != nil {
+			t.Fatal(err)
+		}
+		path := f.Name()
+		f.Close()
 		os.Remove(path)
 		defer os.Remove(path)
 
@@ -474,7 +479,7 @@ func BenchmarkSimulation(b *testing.B) {
 		for j := 0; j < 1000; j++ {
 			name := "u" + strconv.Itoa(j)
 			assert(w.Create(name) == nil, "bench create user")
-			assert(w.Transfer("exchange", name, rand.IntN(maxInitCap+1)) == nil, "bench fund user")
+			assert(w.Transfer("exchange", name, 100+rand.IntN(maxInitCap-100+1)) == nil, "bench fund user")
 		}
 		rng := rand.New(rand.NewPCG(42, 0))
 		for round := 0; round < 100000; round++ {
