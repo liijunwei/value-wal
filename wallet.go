@@ -160,6 +160,10 @@ func (w *Ledger) Balances() map[string]int {
 	return out
 }
 
+func (w *Ledger) Entries() []Value {
+	return w.wal.Entries()
+}
+
 func (w *Ledger) Close() error {
 	return w.wal.Close()
 }
