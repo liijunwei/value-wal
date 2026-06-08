@@ -4,3 +4,4 @@ tmp/
 *.log
 *.jsonl
 *.prof
+testdata/
