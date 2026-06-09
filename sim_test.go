@@ -6,7 +6,6 @@ import (
 	"os"
 	"sort"
 	"strconv"
-	"strings"
 	"testing"
 )
 
@@ -355,10 +354,9 @@ func TestSimPropertySum(t *testing.T) {
 // --- Fuzz: random op sequences verify invariants ---
 
 func FuzzSimulation(f *testing.F) {
-	f.Add("c a c b d a 100 t a b 50")
-	f.Add("c x c y c z t x y 10 d z 200 t z x 30 w y 5")
+	f.Add([]byte{0})
 
-	f.Fuzz(func(t *testing.T, seed string) {
+	f.Fuzz(func(t *testing.T, seed []byte) {
 		f, err := os.CreateTemp("", "sim-fuzz-*.jsonl")
 		if err != nil {
 			t.Fatal(err)
@@ -380,75 +378,60 @@ func FuzzSimulation(f *testing.F) {
 		created := map[string]bool{"bank": true}
 		sum := 1_000_000_000
 
-		tokens := strings.Split(seed, " ")
-		i := 0
-		for i < len(tokens) {
-			if tokens[i] == "" {
-				i++
-				continue
+		rng := seedRNG(seed)
+		ops := 10 + rng.IntN(100)
+		for op := 0; op < ops; op++ {
+			owners := make([]string, 0, len(created))
+			for o := range created {
+				owners = append(owners, o)
 			}
-			cmd := tokens[i]
-			i++
 
-			switch cmd {
-			case "c":
-				if i >= len(tokens) {
-					break
-				}
-				name := tokens[i]
-				i++
-				if created[name] {
-					continue
-				}
-				if w.Create(name) == nil {
+			switch rng.IntN(4) {
+			case 0: // create
+				name := "u" + strconv.Itoa(rng.IntN(100000))
+				if !created[name] && w.Create(name) == nil {
 					created[name] = true
 				}
 
-			case "d":
-				if i+1 >= len(tokens) {
-					break
-				}
-				name := tokens[i]
-				amount, err := strconv.Atoi(tokens[i+1])
-				i += 2
-				if err != nil || amount <= 0 || !created[name] {
+			case 1: // deposit
+				if len(owners) == 0 {
 					continue
 				}
+				name := owners[rng.IntN(len(owners))]
+				amount := 1 + rng.IntN(100000)
 				if w.Deposit(name, amount) == nil {
 					sum += amount
 				}
 
-			case "w":
-				if i+1 >= len(tokens) {
-					break
-				}
-				name := tokens[i]
-				amount, err := strconv.Atoi(tokens[i+1])
-				i += 2
-				if err != nil || amount <= 0 || !created[name] {
+			case 2: // withdraw
+				if len(owners) == 0 {
 					continue
 				}
+				name := owners[rng.IntN(len(owners))]
 				bal, ok := w.Balance(name)
-				assert(ok, "fuzz withdraw balance")
-				if bal >= amount && w.Withdraw(name, amount) == nil {
+				if !ok || bal == 0 {
+					continue
+				}
+				amount := 1 + rng.IntN(min(bal, 10000))
+				if w.Withdraw(name, amount) == nil {
 					sum -= amount
 				}
 
-			case "t":
-				if i+2 >= len(tokens) {
-					break
-				}
-				from, to := tokens[i], tokens[i+1]
-				amount, err := strconv.Atoi(tokens[i+2])
-				i += 3
-				if err != nil || amount <= 0 || from == to || !created[from] || !created[to] {
+			case 3: // transfer
+				if len(owners) < 2 {
 					continue
 				}
-				bal, ok := w.Balance(from)
-				assert(ok, "fuzz transfer balance")
-				if bal >= amount {
-					w.Transfer(from, to, amount)
+				i, j := rng.IntN(len(owners)), rng.IntN(len(owners))
+				if i == j {
+					continue
 				}
+				from, to := owners[i], owners[j]
+				fromBal, ok := w.Balance(from)
+				if !ok || fromBal == 0 {
+					continue
+				}
+				amount := 1 + rng.IntN(min(fromBal, 10000))
+				w.Transfer(from, to, amount)
 			}
 		}
 

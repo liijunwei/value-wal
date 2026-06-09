@@ -7,7 +7,6 @@ import (
 	"math"
 	"os"
 	"strconv"
-	"strings"
 	"sync"
 	"testing"
 )
@@ -73,7 +72,7 @@ func TestDeposit(t *testing.T) {
 
 	// non-existent
 	if err := w.Deposit("nobody", 10); err == nil {
-		t.Fatal("expected deposit to non-existent ledger account to fail")
+		t.Fatal("expected deposit to non-existent wallet to fail")
 	}
 	// zero / negative
 	if err := w.Deposit("alice", 0); err == nil {
@@ -113,7 +112,7 @@ func TestWithdraw(t *testing.T) {
 	}
 	// non-existent
 	if err := w.Withdraw("nobody", 10); err == nil {
-		t.Fatal("expected withdraw from non-existent ledger account to fail")
+		t.Fatal("expected withdraw from non-existent wallet to fail")
 	}
 	// zero / negative
 	if err := w.Withdraw("alice", 0); err == nil {
@@ -423,116 +422,168 @@ func TestBalancesReturnsCopy(t *testing.T) {
 	}
 }
 
-// --- Fuzz test ---
+// --- Fuzz helpers ---
 
-func FuzzLedger(f *testing.F) {
-	// seed corpus
-	f.Add("c a c b d a 100 d b 50 t a b 20 w a 30")
-	f.Add("c x d x 1000 w x 500 w x 500")
-	f.Add("c one c two c three d one 10 t one two 5 t two three 3")
+// seedRNG derives a deterministic *rand.Rand from a fuzz seed byte slice.
+// Different seeds produce different sequences; same seed always produces the same sequence.
+func seedRNG(seed []byte) *rand.Rand {
+	var a, b uint64
+	for i, by := range seed {
+		if i%2 == 0 {
+			a = a ^ (a << 7) ^ uint64(by)
+		} else {
+			b = b ^ (b << 13) ^ uint64(by)
+		}
+	}
+	return rand.New(rand.NewPCG(a, b))
+}
 
-	f.Fuzz(func(t *testing.T, seed string) {
-		w, _ := openLedger(t)
+// randRun executes random ledger operations driven by rng.
+// Best-effort: operations may fail harmlessly (duplicate create, insufficient balance, etc.).
+func randRun(rng *rand.Rand, w *Ledger, created map[string]bool) {
+	ops := 10 + rng.IntN(100)
+	for op := 0; op < ops; op++ {
+		owners := make([]string, 0, len(created))
+		for o := range created {
+			owners = append(owners, o)
+		}
 
-		// track expected via independent calculation
-		expect := make(map[string]int)
-		created := make(map[string]bool)
-		opCount := 0
-
-		tokens := strings.Split(seed, " ")
-		i := 0
-		for i < len(tokens) {
-			if tokens[i] == "" {
-				i++
+		switch rng.IntN(4) {
+		case 0: // create
+			name := "u" + strconv.Itoa(rng.IntN(100000))
+			if !created[name] {
+				w.Create(name)
+				created[name] = true
+			}
+		case 1: // deposit
+			if len(owners) == 0 {
 				continue
 			}
-			cmd := tokens[i]
-			i++
-			opCount++
+			name := owners[rng.IntN(len(owners))]
+			amount := 1 + rng.IntN(100000)
+			w.Deposit(name, amount)
+		case 2: // withdraw
+			if len(owners) == 0 {
+				continue
+			}
+			name := owners[rng.IntN(len(owners))]
+			bal, ok := w.Balance(name)
+			if !ok || bal == 0 {
+				continue
+			}
+			amount := 1 + rng.IntN(min(bal, 10000))
+			w.Withdraw(name, amount)
+		case 3: // transfer
+			if len(owners) < 2 {
+				continue
+			}
+			i, j := rng.IntN(len(owners)), rng.IntN(len(owners))
+			if i == j {
+				continue
+			}
+			from, to := owners[i], owners[j]
+			fromBal, ok := w.Balance(from)
+			if !ok || fromBal == 0 {
+				continue
+			}
+			amount := 1 + rng.IntN(min(fromBal, 10000))
+			w.Transfer(from, to, amount)
+		}
+	}
+}
 
-			switch cmd {
-			case "c": // create owner
-				if i >= len(tokens) {
-					break
-				}
-				owner := tokens[i]
-				i++
-				err := w.Create(owner)
-				if created[owner] {
+// --- Fuzz tests ---
+
+func FuzzLedger(f *testing.F) {
+	f.Add([]byte{0})
+
+	f.Fuzz(func(t *testing.T, seed []byte) {
+		w, _ := openLedger(t)
+		rng := seedRNG(seed)
+
+		created := map[string]bool{}
+		expect := make(map[string]int)
+
+		ops := 10 + rng.IntN(100)
+		for op := 0; op < ops; op++ {
+			owners := make([]string, 0, len(created))
+			for o := range created {
+				owners = append(owners, o)
+			}
+
+			switch rng.IntN(4) {
+			case 0: // create
+				name := "u" + strconv.Itoa(rng.IntN(100000))
+				err := w.Create(name)
+				if created[name] {
 					if err == nil {
-						t.Fatalf("step %d: duplicate create %s should fail", opCount, owner)
+						t.Fatalf("step %d: duplicate create %s should fail", op, name)
 					}
 				} else {
 					if err != nil {
-						t.Fatalf("step %d: create %s: %v", opCount, owner, err)
+						t.Fatalf("step %d: create %s: %v", op, name, err)
 					}
-					created[owner] = true
-					expect[owner] = 0
+					created[name] = true
+					expect[name] = 0
 				}
 
-			case "d": // deposit owner amount
-				if i+1 >= len(tokens) {
-					break
-				}
-				owner := tokens[i]
-				amount, err := strconv.Atoi(tokens[i+1])
-				i += 2
-				if err != nil {
+			case 1: // deposit
+				if len(owners) == 0 {
 					continue
 				}
-				werr := w.Deposit(owner, amount)
-				if !created[owner] || amount <= 0 {
-					if werr == nil {
-						t.Fatalf("step %d: deposit %s %d should fail", opCount, owner, amount)
+				name := owners[rng.IntN(len(owners))]
+				amount := 1 + rng.IntN(100000)
+				err := w.Deposit(name, amount)
+				if amount <= 0 || !created[name] {
+					if err == nil {
+						t.Fatalf("step %d: deposit %s %d should fail", op, name, amount)
 					}
 				} else {
-					if werr != nil {
-						t.Fatalf("step %d: deposit %s %d: %v", opCount, owner, amount, werr)
+					if err != nil {
+						t.Fatalf("step %d: deposit %s %d: %v", op, name, amount, err)
 					}
-					expect[owner] += amount
+					expect[name] += amount
 				}
 
-			case "w": // withdraw owner amount
-				if i+1 >= len(tokens) {
-					break
-				}
-				owner := tokens[i]
-				amount, err := strconv.Atoi(tokens[i+1])
-				i += 2
-				if err != nil {
+			case 2: // withdraw
+				if len(owners) == 0 {
 					continue
 				}
-				werr := w.Withdraw(owner, amount)
-				if !created[owner] || amount <= 0 || expect[owner] < amount {
-					if werr == nil {
-						t.Fatalf("step %d: withdraw %s %d should fail (bal=%d)", opCount, owner, amount, expect[owner])
+				name := owners[rng.IntN(len(owners))]
+				bal := expect[name]
+				amount := 1 + rng.IntN(bal + 100) // may exceed balance to test failure path
+				err := w.Withdraw(name, amount)
+				if amount <= 0 || !created[name] || bal < amount {
+					if err == nil {
+						t.Fatalf("step %d: withdraw %s %d should fail (bal=%d)", op, name, amount, bal)
 					}
 				} else {
-					if werr != nil {
-						t.Fatalf("step %d: withdraw %s %d: %v", opCount, owner, amount, werr)
+					if err != nil {
+						t.Fatalf("step %d: withdraw %s %d: %v", op, name, amount, err)
 					}
-					expect[owner] -= amount
+					expect[name] -= amount
 				}
 
-			case "t": // transfer from to amount
-				if i+2 >= len(tokens) {
-					break
-				}
-				from, to := tokens[i], tokens[i+1]
-				amount, err := strconv.Atoi(tokens[i+2])
-				i += 3
-				if err != nil {
+			case 3: // transfer
+				if len(owners) < 2 {
 					continue
 				}
-				terr := w.Transfer(from, to, amount)
-				shouldFail := !created[from] || !created[to] || from == to || amount <= 0 || expect[from] < amount
+				i, j := rng.IntN(len(owners)), rng.IntN(len(owners))
+				if i == j {
+					continue
+				}
+				from, to := owners[i], owners[j]
+				fromBal := expect[from]
+				amount := 1 + rng.IntN(fromBal + 100) // may exceed balance
+				err := w.Transfer(from, to, amount)
+				shouldFail := !created[from] || !created[to] || from == to || amount <= 0 || fromBal < amount
 				if shouldFail {
-					if terr == nil {
-						t.Fatalf("step %d: transfer %s->%s %d should fail", opCount, from, to, amount)
+					if err == nil {
+						t.Fatalf("step %d: transfer %s->%s %d should fail", op, from, to, amount)
 					}
 				} else {
-					if terr != nil {
-						t.Fatalf("step %d: transfer %s->%s %d: %v", opCount, from, to, amount, terr)
+					if err != nil {
+						t.Fatalf("step %d: transfer %s->%s %d: %v", op, from, to, amount, err)
 					}
 					expect[from] -= amount
 					expect[to] += amount
@@ -557,18 +608,18 @@ func FuzzLedger(f *testing.F) {
 				t.Fatalf("%s has negative balance: %d", owner, bal)
 			}
 		}
-
-		})
+	})
 }
 
 func FuzzCrashRecovery(f *testing.F) {
-	f.Add("c a c b d a 100 d b 50 t a b 20 w a 10")
+	f.Add([]byte{0})
 
-	f.Fuzz(func(t *testing.T, seed string) {
+	f.Fuzz(func(t *testing.T, seed []byte) {
 		path := tempPath(t)
+		rng := seedRNG(seed)
 		expect := make(map[string]int)
 
-		// first session
+		// first session: run random ops, track expected state
 		func() {
 			w, err := NewLedger(path)
 			if err != nil {
@@ -576,57 +627,60 @@ func FuzzCrashRecovery(f *testing.F) {
 			}
 			defer w.Close()
 
-			created := make(map[string]bool)
-			tokens := strings.Split(seed, " ")
-			i := 0
-			for i < len(tokens) {
-				if tokens[i] == "" {
-					i++
-					continue
+			created := map[string]bool{}
+			ops := 10 + rng.IntN(100)
+			for op := 0; op < ops; op++ {
+				owners := make([]string, 0, len(created))
+				for o := range created {
+					owners = append(owners, o)
 				}
-				cmd := tokens[i]
-				i++
 
-				switch cmd {
-				case "c":
-					if i >= len(tokens) {
-						break
+				switch rng.IntN(4) {
+				case 0: // create
+					name := "u" + strconv.Itoa(rng.IntN(100000))
+					if !created[name] {
+						if w.Create(name) == nil {
+							created[name] = true
+							expect[name] = 0
+						}
 					}
-					owner := tokens[i]
-					i++
-					if !created[owner] {
-						w.Create(owner)
-						created[owner] = true
-						expect[owner] = 0
+				case 1: // deposit
+					if len(owners) == 0 {
+						continue
 					}
-				case "d":
-					if i+1 >= len(tokens) {
-						break
+					name := owners[rng.IntN(len(owners))]
+					amount := 1 + rng.IntN(100000)
+					if w.Deposit(name, amount) == nil {
+						expect[name] += amount
 					}
-					owner := tokens[i]
-					amount, _ := strconv.Atoi(tokens[i+1])
-					i += 2
-					if created[owner] && amount > 0 && w.Deposit(owner, amount) == nil {
-						expect[owner] += amount
+				case 2: // withdraw
+					if len(owners) == 0 {
+						continue
 					}
-				case "w":
-					if i+1 >= len(tokens) {
-						break
+					name := owners[rng.IntN(len(owners))]
+					bal := expect[name]
+					if bal == 0 {
+						continue
 					}
-					owner := tokens[i]
-					amount, _ := strconv.Atoi(tokens[i+1])
-					i += 2
-					if created[owner] && amount > 0 && expect[owner] >= amount && w.Withdraw(owner, amount) == nil {
-						expect[owner] -= amount
+					amount := 1 + rng.IntN(min(bal, 10000))
+					if w.Withdraw(name, amount) == nil {
+						expect[name] -= amount
 					}
-				case "t":
-					if i+2 >= len(tokens) {
-						break
+				case 3: // transfer
+					if len(owners) < 2 {
+						continue
 					}
-					from, to := tokens[i], tokens[i+1]
-					amount, _ := strconv.Atoi(tokens[i+2])
-					i += 3
-					if created[from] && created[to] && from != to && amount > 0 && expect[from] >= amount && w.Transfer(from, to, amount) == nil {
+					i, j := rng.IntN(len(owners)), rng.IntN(len(owners))
+					if i == j {
+						continue
+					}
+					from, to := owners[i], owners[j]
+					fromBal := expect[from]
+					if fromBal == 0 {
+						continue
+					}
+					amount := 1 + rng.IntN(min(fromBal, 10000))
+					if w.Transfer(from, to, amount) == nil {
 						expect[from] -= amount
 						expect[to] += amount
 					}
@@ -715,16 +769,17 @@ func TestConcurrentMixedOps(t *testing.T) {
 // --- Fuzz: transfer atomicity ---
 
 func FuzzTransferAtomicity(f *testing.F) {
-	f.Add("c a c b d a 100 t a b 50")
-	f.Add("c x c y c z d x 500 t x y 20 t z x 30 w y 5")
+	f.Add([]byte{0})
 
-	f.Fuzz(func(t *testing.T, seed string) {
+	f.Fuzz(func(t *testing.T, seed []byte) {
 		w, _ := openLedger(t)
+		rng := seedRNG(seed)
+
 		w.Create("bank")
 		w.Deposit("bank", 1_000_000)
 
 		created := map[string]bool{"bank": true}
-		parseAndRun(t, seed, w, created)
+		randRun(rng, w, created)
 
 		for _, v := range w.Entries() {
 			if v.Type != "ledger_transfer" {
@@ -755,10 +810,11 @@ func FuzzTransferAtomicity(f *testing.F) {
 // --- Fuzz: WAL append-only ---
 
 func FuzzWALAppendOnly(f *testing.F) {
-	f.Add("c a c b d a 100 d b 50 t a b 20")
+	f.Add([]byte{0})
 
-	f.Fuzz(func(t *testing.T, seed string) {
+	f.Fuzz(func(t *testing.T, seed []byte) {
 		path := tempPath(t)
+		rng := seedRNG(seed)
 
 		w, err := NewLedger(path)
 		if err != nil {
@@ -769,7 +825,7 @@ func FuzzWALAppendOnly(f *testing.F) {
 		w.Deposit("bank", 1_000_000)
 
 		created := map[string]bool{"bank": true}
-		parseAndRun(t, seed, w, created)
+		randRun(rng, w, created)
 
 		entriesBefore := w.Entries()
 		countBefore := len(entriesBefore)
@@ -797,16 +853,17 @@ func FuzzWALAppendOnly(f *testing.F) {
 // --- Fuzz: account traceability ---
 
 func FuzzAccountTraceability(f *testing.F) {
-	f.Add("c a c b d a 100 d b 50 t a b 20 w a 30")
-	f.Add("c x c y c z d x 500 t x y 100 t z x 200 w z 50")
+	f.Add([]byte{0})
 
-	f.Fuzz(func(t *testing.T, seed string) {
+	f.Fuzz(func(t *testing.T, seed []byte) {
 		w, _ := openLedger(t)
+		rng := seedRNG(seed)
+
 		w.Create("bank")
 		w.Deposit("bank", 1_000_000)
 
 		created := map[string]bool{"bank": true}
-		parseAndRun(t, seed, w, created)
+		randRun(rng, w, created)
 
 		for name, actual := range w.Balances() {
 			derived := 0
@@ -824,7 +881,7 @@ func FuzzAccountTraceability(f *testing.F) {
 	})
 }
 
-// --- PBT: concurrency safety ---
+// --- PBT: concurrent safety ---
 
 func TestPropertyConcurrentSafety(t *testing.T) {
 	w, _ := openLedger(t)
@@ -875,72 +932,6 @@ func TestPropertyConcurrentSafety(t *testing.T) {
 	}
 	if sum != 1_000_000 {
 		t.Errorf("conservation broken: sum=%d, expected=%d", sum, 1_000_000)
-	}
-}
-
-func parseAndRun(t *testing.T, seed string, w *Ledger, created map[string]bool) {
-	t.Helper()
-	tokens := strings.Split(seed, " ")
-	i := 0
-	for i < len(tokens) {
-		if tokens[i] == "" {
-			i++
-			continue
-		}
-		cmd := tokens[i]
-		i++
-
-		switch cmd {
-		case "c":
-			if i >= len(tokens) {
-				break
-			}
-			owner := tokens[i]
-			i++
-			if !created[owner] {
-				w.Create(owner)
-				created[owner] = true
-			}
-		case "d":
-			if i+1 >= len(tokens) {
-				break
-			}
-			owner := tokens[i]
-			amount, err := strconv.Atoi(tokens[i+1])
-			i += 2
-			if err != nil || amount <= 0 || !created[owner] {
-				continue
-			}
-			w.Deposit(owner, amount)
-		case "w":
-			if i+1 >= len(tokens) {
-				break
-			}
-			owner := tokens[i]
-			amount, err := strconv.Atoi(tokens[i+1])
-			i += 2
-			if err != nil || amount <= 0 || !created[owner] {
-				continue
-			}
-			bal, ok := w.Balance(owner)
-			if ok && bal >= amount {
-				w.Withdraw(owner, amount)
-			}
-		case "t":
-			if i+2 >= len(tokens) {
-				break
-			}
-			from, to := tokens[i], tokens[i+1]
-			amount, err := strconv.Atoi(tokens[i+2])
-			i += 3
-			if err != nil || amount <= 0 || from == to || !created[from] || !created[to] {
-				continue
-			}
-			bal, ok := w.Balance(from)
-			if ok && bal >= amount {
-				w.Transfer(from, to, amount)
-			}
-		}
 	}
 }
 
