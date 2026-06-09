@@ -577,43 +577,55 @@ func FuzzCrashRecovery(f *testing.F) {
 			defer w.Close()
 
 			created := make(map[string]bool)
-			for _, line := range strings.Split(seed, " ") {
-				parts := strings.Split(line, " ")
-				if len(parts) < 2 {
+			tokens := strings.Split(seed, " ")
+			i := 0
+			for i < len(tokens) {
+				if tokens[i] == "" {
+					i++
 					continue
 				}
-				switch parts[0] {
+				cmd := tokens[i]
+				i++
+
+				switch cmd {
 				case "c":
-					owner := parts[1]
+					if i >= len(tokens) {
+						break
+					}
+					owner := tokens[i]
+					i++
 					if !created[owner] {
 						w.Create(owner)
 						created[owner] = true
 						expect[owner] = 0
 					}
 				case "d":
-					if len(parts) < 3 {
-						continue
+					if i+1 >= len(tokens) {
+						break
 					}
-					owner := parts[1]
-					amount, _ := strconv.Atoi(parts[2])
+					owner := tokens[i]
+					amount, _ := strconv.Atoi(tokens[i+1])
+					i += 2
 					if created[owner] && amount > 0 && w.Deposit(owner, amount) == nil {
 						expect[owner] += amount
 					}
 				case "w":
-					if len(parts) < 3 {
-						continue
+					if i+1 >= len(tokens) {
+						break
 					}
-					owner := parts[1]
-					amount, _ := strconv.Atoi(parts[2])
+					owner := tokens[i]
+					amount, _ := strconv.Atoi(tokens[i+1])
+					i += 2
 					if created[owner] && amount > 0 && expect[owner] >= amount && w.Withdraw(owner, amount) == nil {
 						expect[owner] -= amount
 					}
 				case "t":
-					if len(parts) < 4 {
-						continue
+					if i+2 >= len(tokens) {
+						break
 					}
-					from, to := parts[1], parts[2]
-					amount, _ := strconv.Atoi(parts[3])
+					from, to := tokens[i], tokens[i+1]
+					amount, _ := strconv.Atoi(tokens[i+2])
+					i += 3
 					if created[from] && created[to] && from != to && amount > 0 && expect[from] >= amount && w.Transfer(from, to, amount) == nil {
 						expect[from] -= amount
 						expect[to] += amount
