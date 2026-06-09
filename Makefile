@@ -5,7 +5,7 @@
 
 .DEFAULT_GOAL := help
 
-.PHONY: help test test-sim test-pbt fuzz fuzz-all bench cover run
+.PHONY: help test test-sim test-pbt fuzz fuzz-crash fuzz-trace fuzz-all bench cover run
 
 help: ## Show help
 	@echo "targets:"
@@ -21,26 +21,18 @@ test-sim: ## Exchange simulation (10k users, ~1.2M transfers), prints balance di
 test-pbt: ## Conservation PBT (5000 random ops, invariant check at each step)
 	go test -v -run TestSimPropertySum$$ -count=1 -timeout 30s .
 
-fuzz: ## Fuzz test (random command sequences, 30s)
-	go test -run='^$$' -fuzz=FuzzSimulation -fuzztime=30s -timeout 60s .
+fuzz: ## Fuzz test (random op sequences, 30s)
+	go test -run='^$$' -fuzz=FuzzLedger -fuzztime=30s -timeout 60s .
 
 fuzz-crash: ## Fuzz test (crash recovery, 30s)
 	go test -run='^$$' -fuzz=FuzzCrashRecovery -fuzztime=30s -timeout 60s .
 
-fuzz-atomic: ## Fuzz test (transfer atomicity, 30s)
-	go test -run='^$$' -fuzz=FuzzTransferAtomicity -fuzztime=30s -timeout 60s .
-
-fuzz-append: ## Fuzz test (WAL append-only, 30s)
-	go test -run='^$$' -fuzz=FuzzWALAppendOnly -fuzztime=30s -timeout 60s .
-
 fuzz-trace: ## Fuzz test (account traceability, 30s)
 	go test -run='^$$' -fuzz=FuzzAccountTraceability -fuzztime=30s -timeout 60s .
 
-fuzz-all: ## Fuzz test (all 5, 10s each)
-	go test -run='^$$' -fuzz=FuzzSimulation -fuzztime=10s -timeout 120s .
+fuzz-all: ## Fuzz test (all 3, 10s each)
+	go test -run='^$$' -fuzz=FuzzLedger -fuzztime=10s -timeout 120s .
 	go test -run='^$$' -fuzz=FuzzCrashRecovery -fuzztime=10s -timeout 120s .
-	go test -run='^$$' -fuzz=FuzzTransferAtomicity -fuzztime=10s -timeout 120s .
-	go test -run='^$$' -fuzz=FuzzWALAppendOnly -fuzztime=10s -timeout 120s .
 	go test -run='^$$' -fuzz=FuzzAccountTraceability -fuzztime=10s -timeout 120s .
 
 bench: ## Benchmark

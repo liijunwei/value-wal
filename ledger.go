@@ -36,6 +36,11 @@ func NewLedgerWithWAL(wal WAL) *Ledger {
 	for _, v := range wal.Entries() {
 		l.apply(v)
 	}
+	for owner, bal := range l.balances {
+		if bal < 0 {
+			panic(fmt.Sprintf("corrupt WAL: account %s has negative balance %d after replay", owner, bal))
+		}
+	}
 	return l
 }
 
@@ -94,18 +99,24 @@ func valueBalanceDelta(v Value, owner string) (int, error) {
 
 // --- Ledger methods ---
 
+func mustAtoi(s string) int {
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		panic(fmt.Sprintf("corrupt WAL: invalid amount %q", s))
+	}
+	return n
+}
+
 func (l *Ledger) apply(v Value) {
 	switch v.Type {
 	case "ledger_create":
 		l.balances[v.Data["owner"]] = 0
 	case "ledger_deposit":
-		amt, _ := strconv.Atoi(v.Data["amount"])
-		l.balances[v.Data["owner"]] += amt
+		l.balances[v.Data["owner"]] += mustAtoi(v.Data["amount"])
 	case "ledger_withdraw":
-		amt, _ := strconv.Atoi(v.Data["amount"])
-		l.balances[v.Data["owner"]] -= amt
+		l.balances[v.Data["owner"]] -= mustAtoi(v.Data["amount"])
 	case "ledger_transfer":
-		amt, _ := strconv.Atoi(v.Data["amount"])
+		amt := mustAtoi(v.Data["amount"])
 		l.balances[v.Data["from"]] -= amt
 		l.balances[v.Data["to"]] += amt
 	}
