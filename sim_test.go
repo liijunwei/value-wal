@@ -473,7 +473,7 @@ func BenchmarkSimulation(b *testing.B) {
 		path := "sim-bench-wal.jsonl"
 		os.Remove(path)
 		w, err := NewLedger(path)
-		assert(err == nil, "bench new wallet")
+		assert(err == nil, "bench new ledger")
 		assert(w.Create("exchange") == nil, "bench create exchange")
 		assert(w.Deposit("exchange", exchangeInit) == nil, "bench fund exchange")
 		for j := 0; j < 1000; j++ {

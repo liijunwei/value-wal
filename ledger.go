@@ -44,9 +44,9 @@ func NewLedgerWithWAL(wal WAL) *Ledger {
 // valueInvolves returns true if the WAL entry references owner in any role.
 func valueInvolves(v Value, owner string) bool {
 	switch v.Type {
-	case "wallet_create", "wallet_deposit", "wallet_withdraw":
+	case "ledger_create", "ledger_deposit", "ledger_withdraw":
 		return v.Data["owner"] == owner
-	case "wallet_transfer":
+	case "ledger_transfer":
 		return v.Data["from"] == owner || v.Data["to"] == owner
 	default:
 		return false
@@ -57,7 +57,7 @@ func valueInvolves(v Value, owner string) bool {
 // Returns an error if the amount field is not a valid integer (corrupt WAL).
 func valueBalanceDelta(v Value, owner string) (int, error) {
 	switch v.Type {
-	case "wallet_deposit":
+	case "ledger_deposit":
 		if v.Data["owner"] != owner {
 			return 0, nil
 		}
@@ -66,7 +66,7 @@ func valueBalanceDelta(v Value, owner string) (int, error) {
 			return 0, fmt.Errorf("corrupt WAL entry %d: invalid amount %q", v.ID, v.Data["amount"])
 		}
 		return amt, nil
-	case "wallet_withdraw":
+	case "ledger_withdraw":
 		if v.Data["owner"] != owner {
 			return 0, nil
 		}
@@ -75,7 +75,7 @@ func valueBalanceDelta(v Value, owner string) (int, error) {
 			return 0, fmt.Errorf("corrupt WAL entry %d: invalid amount %q", v.ID, v.Data["amount"])
 		}
 		return -amt, nil
-	case "wallet_transfer":
+	case "ledger_transfer":
 		amt, err := strconv.Atoi(v.Data["amount"])
 		if err != nil {
 			return 0, fmt.Errorf("corrupt WAL entry %d: invalid amount %q", v.ID, v.Data["amount"])
@@ -96,15 +96,15 @@ func valueBalanceDelta(v Value, owner string) (int, error) {
 
 func (l *Ledger) apply(v Value) {
 	switch v.Type {
-	case "wallet_create":
+	case "ledger_create":
 		l.balances[v.Data["owner"]] = 0
-	case "wallet_deposit":
+	case "ledger_deposit":
 		amt, _ := strconv.Atoi(v.Data["amount"])
 		l.balances[v.Data["owner"]] += amt
-	case "wallet_withdraw":
+	case "ledger_withdraw":
 		amt, _ := strconv.Atoi(v.Data["amount"])
 		l.balances[v.Data["owner"]] -= amt
-	case "wallet_transfer":
+	case "ledger_transfer":
 		amt, _ := strconv.Atoi(v.Data["amount"])
 		l.balances[v.Data["from"]] -= amt
 		l.balances[v.Data["to"]] += amt
@@ -116,10 +116,10 @@ func (l *Ledger) Create(owner string) error {
 	defer l.mu.Unlock()
 
 	if _, exists := l.balances[owner]; exists {
-		return fmt.Errorf("wallet %s already exists", owner)
+		return fmt.Errorf("ledger account %s already exists", owner)
 	}
 
-	v, err := l.wal.Append("wallet_create", map[string]string{"owner": owner})
+	v, err := l.wal.Append("ledger_create", map[string]string{"owner": owner})
 	if err != nil {
 		return err
 	}
@@ -132,13 +132,13 @@ func (l *Ledger) Deposit(owner string, amount int) error {
 	defer l.mu.Unlock()
 
 	if _, exists := l.balances[owner]; !exists {
-		return fmt.Errorf("wallet %s not found", owner)
+		return fmt.Errorf("ledger account %s not found", owner)
 	}
 	if amount <= 0 {
 		return fmt.Errorf("deposit amount must be positive")
 	}
 
-	v, err := l.wal.Append("wallet_deposit", map[string]string{
+	v, err := l.wal.Append("ledger_deposit", map[string]string{
 		"owner":  owner,
 		"amount": strconv.Itoa(amount),
 	})
@@ -155,7 +155,7 @@ func (l *Ledger) Withdraw(owner string, amount int) error {
 
 	bal, exists := l.balances[owner]
 	if !exists {
-		return fmt.Errorf("wallet %s not found", owner)
+		return fmt.Errorf("ledger account %s not found", owner)
 	}
 	if amount <= 0 {
 		return fmt.Errorf("withdraw amount must be positive")
@@ -164,7 +164,7 @@ func (l *Ledger) Withdraw(owner string, amount int) error {
 		return fmt.Errorf("insufficient balance: %s has %d, tried to withdraw %d", owner, bal, amount)
 	}
 
-	v, err := l.wal.Append("wallet_withdraw", map[string]string{
+	v, err := l.wal.Append("ledger_withdraw", map[string]string{
 		"owner":  owner,
 		"amount": strconv.Itoa(amount),
 	})
@@ -184,10 +184,10 @@ func (l *Ledger) Transfer(from, to string, amount int) error {
 	}
 	fromBal, exists := l.balances[from]
 	if !exists {
-		return fmt.Errorf("wallet %s not found", from)
+		return fmt.Errorf("ledger account %s not found", from)
 	}
 	if _, exists := l.balances[to]; !exists {
-		return fmt.Errorf("wallet %s not found", to)
+		return fmt.Errorf("ledger account %s not found", to)
 	}
 	if amount <= 0 {
 		return fmt.Errorf("transfer amount must be positive")
@@ -196,7 +196,7 @@ func (l *Ledger) Transfer(from, to string, amount int) error {
 		return fmt.Errorf("insufficient balance: %s has %d, tried to transfer %d", from, fromBal, amount)
 	}
 
-	v, err := l.wal.Append("wallet_transfer", map[string]string{
+	v, err := l.wal.Append("ledger_transfer", map[string]string{
 		"from":   from,
 		"to":     to,
 		"amount": strconv.Itoa(amount),
@@ -239,7 +239,7 @@ func (l *Ledger) History(owner string) ([]Value, error) {
 	defer l.mu.Unlock()
 
 	if _, exists := l.balances[owner]; !exists {
-		return nil, fmt.Errorf("wallet %s not found", owner)
+		return nil, fmt.Errorf("ledger account %s not found", owner)
 	}
 
 	var result []Value
@@ -258,7 +258,7 @@ func (l *Ledger) Verify(owner string) error {
 	defer l.mu.Unlock()
 
 	if _, exists := l.balances[owner]; !exists {
-		return fmt.Errorf("wallet %s not found", owner)
+		return fmt.Errorf("ledger account %s not found", owner)
 	}
 	return l.verifyLocked(owner)
 }

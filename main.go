@@ -105,7 +105,7 @@ func assert(ok bool, msg string) {
 }
 
 func main() {
-	path := "wallet.jsonl"
+	path := "ledger.jsonl"
 	os.Remove(path)
 
 	w, err := NewLedger(path)
@@ -115,7 +115,7 @@ func main() {
 	}
 	defer w.Close()
 
-	// 建钱包
+	// 建账户
 	w.Create("alice")
 	w.Create("bob")
 
@@ -159,13 +159,13 @@ func main() {
 		fmt.Printf("  %s (%d entries):\n", owner, len(entries))
 		for _, v := range entries {
 			switch v.Type {
-			case "wallet_create":
+			case "ledger_create":
 				fmt.Printf("    create\n")
-			case "wallet_deposit":
+			case "ledger_deposit":
 				fmt.Printf("    deposit +%s\n", v.Data["amount"])
-			case "wallet_withdraw":
+			case "ledger_withdraw":
 				fmt.Printf("    withdraw -%s\n", v.Data["amount"])
-			case "wallet_transfer":
+			case "ledger_transfer":
 				if v.Data["from"] == owner {
 					fmt.Printf("    transfer to %s -%s\n", v.Data["to"], v.Data["amount"])
 				} else {
@@ -178,7 +178,7 @@ func main() {
 	// 崩溃恢复
 	w.Close()
 	w2, err := NewLedger(path)
-	assert(err == nil, "reopen wallet after close")
+	assert(err == nil, "reopen ledger after close")
 	defer w2.Close()
 	fmt.Println("\nafter reopen:")
 	for owner, bal := range w2.Balances() {

@@ -14,7 +14,7 @@ import (
 
 func tempPath(t *testing.T) string {
 	t.Helper()
-	f, err := os.CreateTemp("", "wallet-test-*.jsonl")
+	f, err := os.CreateTemp("", "ledger-test-*.jsonl")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -25,7 +25,7 @@ func tempPath(t *testing.T) string {
 	return path
 }
 
-func openWallet(t *testing.T) (*Ledger, string) {
+func openLedger(t *testing.T) (*Ledger, string) {
 	t.Helper()
 	path := tempPath(t)
 	w, err := NewLedger(path)
@@ -39,7 +39,7 @@ func openWallet(t *testing.T) (*Ledger, string) {
 // --- Unit tests ---
 
 func TestCreate(t *testing.T) {
-	w, _ := openWallet(t)
+	w, _ := openLedger(t)
 
 	if err := w.Create("alice"); err != nil {
 		t.Fatal(err)
@@ -59,7 +59,7 @@ func TestCreate(t *testing.T) {
 }
 
 func TestDeposit(t *testing.T) {
-	w, _ := openWallet(t)
+	w, _ := openLedger(t)
 	w.Create("alice")
 	w.Create("bob")
 
@@ -73,7 +73,7 @@ func TestDeposit(t *testing.T) {
 
 	// non-existent
 	if err := w.Deposit("nobody", 10); err == nil {
-		t.Fatal("expected deposit to non-existent wallet to fail")
+		t.Fatal("expected deposit to non-existent ledger account to fail")
 	}
 	// zero / negative
 	if err := w.Deposit("alice", 0); err == nil {
@@ -90,7 +90,7 @@ func TestDeposit(t *testing.T) {
 }
 
 func TestWithdraw(t *testing.T) {
-	w, _ := openWallet(t)
+	w, _ := openLedger(t)
 	w.Create("alice")
 	w.Deposit("alice", 500)
 
@@ -113,7 +113,7 @@ func TestWithdraw(t *testing.T) {
 	}
 	// non-existent
 	if err := w.Withdraw("nobody", 10); err == nil {
-		t.Fatal("expected withdraw from non-existent wallet to fail")
+		t.Fatal("expected withdraw from non-existent ledger account to fail")
 	}
 	// zero / negative
 	if err := w.Withdraw("alice", 0); err == nil {
@@ -122,7 +122,7 @@ func TestWithdraw(t *testing.T) {
 }
 
 func TestTransfer(t *testing.T) {
-	w, _ := openWallet(t)
+	w, _ := openLedger(t)
 	w.Create("alice")
 	w.Create("bob")
 	w.Deposit("alice", 500)
@@ -205,7 +205,7 @@ func TestCrashRecovery(t *testing.T) {
 
 // Invariant: sum of all balances == net deposits (deposits + external_transfers_in - withdrawals - external_transfers_out)
 func TestPropertyBalanceSum(t *testing.T) {
-	w, _ := openWallet(t)
+	w, _ := openLedger(t)
 
 	owners := []string{"a", "b", "c", "d"}
 	for _, o := range owners {
@@ -248,7 +248,7 @@ func TestPropertyBalanceSum(t *testing.T) {
 
 // Invariant: no balance ever goes negative
 func TestPropertyNoNegativeBalance(t *testing.T) {
-	w, _ := openWallet(t)
+	w, _ := openLedger(t)
 	w.Create("x")
 	w.Deposit("x", 1000)
 
@@ -264,7 +264,7 @@ func TestPropertyNoNegativeBalance(t *testing.T) {
 
 // Invariant: WAL only contains successful operations
 func TestPropertyWALMatchesState(t *testing.T) {
-	w, _ := openWallet(t)
+	w, _ := openLedger(t)
 	w.Create("a")
 	w.Create("b")
 	w.Deposit("a", 100)
@@ -284,15 +284,15 @@ func TestPropertyWALMatchesState(t *testing.T) {
 	sumFromWAL := make(map[string]int)
 	for _, v := range w.wal.Entries() {
 		switch v.Type {
-		case "wallet_create":
+		case "ledger_create":
 			sumFromWAL[v.Data["owner"]] = 0
-		case "wallet_deposit":
+		case "ledger_deposit":
 			amount, _ := strconv.Atoi(v.Data["amount"])
 			sumFromWAL[v.Data["owner"]] += amount
-		case "wallet_withdraw":
+		case "ledger_withdraw":
 			amount, _ := strconv.Atoi(v.Data["amount"])
 			sumFromWAL[v.Data["owner"]] -= amount
-		case "wallet_transfer":
+		case "ledger_transfer":
 			amount, _ := strconv.Atoi(v.Data["amount"])
 			sumFromWAL[v.Data["from"]] -= amount
 			sumFromWAL[v.Data["to"]] += amount
@@ -308,7 +308,7 @@ func TestPropertyWALMatchesState(t *testing.T) {
 
 // Invariant: Entries() returns data that exactly round-trips through JSON
 func TestPropertyWALEntriesRoundTrip(t *testing.T) {
-	w, _ := openWallet(t)
+	w, _ := openLedger(t)
 	w.Create("a")
 	w.Deposit("a", 100)
 	w.Withdraw("a", 30)
@@ -336,7 +336,7 @@ func TestPropertyWALEntriesRoundTrip(t *testing.T) {
 // --- Edge case tests ---
 
 func TestTransferAllBalance(t *testing.T) {
-	w, _ := openWallet(t)
+	w, _ := openLedger(t)
 	w.Create("a")
 	w.Create("b")
 	w.Deposit("a", 500)
@@ -352,7 +352,7 @@ func TestTransferAllBalance(t *testing.T) {
 }
 
 func TestManyAccounts(t *testing.T) {
-	w, _ := openWallet(t)
+	w, _ := openLedger(t)
 	n := 100
 
 	for i := 1; i <= n; i++ {
@@ -377,7 +377,7 @@ func TestManyAccounts(t *testing.T) {
 }
 
 func TestLargeAmount(t *testing.T) {
-	w, _ := openWallet(t)
+	w, _ := openLedger(t)
 	w.Create("a")
 	w.Create("b")
 
@@ -413,7 +413,7 @@ func TestReopenEmptyWAL(t *testing.T) {
 }
 
 func TestBalancesReturnsCopy(t *testing.T) {
-	w, _ := openWallet(t)
+	w, _ := openLedger(t)
 	w.Create("a")
 	b1 := w.Balances()
 	b1["x"] = 999 // mutate the copy
@@ -425,14 +425,14 @@ func TestBalancesReturnsCopy(t *testing.T) {
 
 // --- Fuzz test ---
 
-func FuzzWallet(f *testing.F) {
+func FuzzLedger(f *testing.F) {
 	// seed corpus
 	f.Add("c a c b d a 100 d b 50 t a b 20 w a 30")
 	f.Add("c x d x 1000 w x 500 w x 500")
 	f.Add("c one c two c three d one 10 t one two 5 t two three 3")
 
 	f.Fuzz(func(t *testing.T, seed string) {
-		w, _ := openWallet(t)
+		w, _ := openLedger(t)
 
 		// track expected via independent calculation
 		expect := make(map[string]int)
@@ -537,7 +537,7 @@ func FuzzWallet(f *testing.F) {
 		for owner, want := range expect {
 			got, ok := w.Balance(owner)
 			if !ok {
-				t.Fatalf("%s missing from wallet", owner)
+				t.Fatalf("%s missing from ledger", owner)
 			}
 			if got != want {
 				t.Fatalf("%s: expected %d, got %d", owner, want, got)
@@ -635,7 +635,7 @@ func FuzzCrashRecovery(f *testing.F) {
 }
 
 func TestConcurrentDeposits(t *testing.T) {
-	w, _ := openWallet(t)
+	w, _ := openLedger(t)
 	w.Create("shared")
 
 	n := 100
@@ -657,7 +657,7 @@ func TestConcurrentDeposits(t *testing.T) {
 }
 
 func TestConcurrentMixedOps(t *testing.T) {
-	w, _ := openWallet(t)
+	w, _ := openLedger(t)
 	w.Create("a")
 	w.Create("b")
 	w.Deposit("a", 10000)
@@ -700,7 +700,7 @@ func FuzzTransferAtomicity(f *testing.F) {
 	f.Add("c x c y c z d x 500 t x y 20 t z x 30 w y 5")
 
 	f.Fuzz(func(t *testing.T, seed string) {
-		w, _ := openWallet(t)
+		w, _ := openLedger(t)
 		w.Create("bank")
 		w.Deposit("bank", 1_000_000)
 
@@ -708,7 +708,7 @@ func FuzzTransferAtomicity(f *testing.F) {
 		parseAndRun(t, seed, w, created)
 
 		for _, v := range w.Entries() {
-			if v.Type != "wallet_transfer" {
+			if v.Type != "ledger_transfer" {
 				continue
 			}
 			from := v.Data["from"]
@@ -782,7 +782,7 @@ func FuzzAccountTraceability(f *testing.F) {
 	f.Add("c x c y c z d x 500 t x y 100 t z x 200 w z 50")
 
 	f.Fuzz(func(t *testing.T, seed string) {
-		w, _ := openWallet(t)
+		w, _ := openLedger(t)
 		w.Create("bank")
 		w.Deposit("bank", 1_000_000)
 
@@ -808,7 +808,7 @@ func FuzzAccountTraceability(f *testing.F) {
 // --- PBT: 并发安全 ---
 
 func TestPropertyConcurrentSafety(t *testing.T) {
-	w, _ := openWallet(t)
+	w, _ := openLedger(t)
 
 	w.Create("bank")
 	w.Deposit("bank", 1_000_000)
@@ -916,7 +916,7 @@ func parseAndRun(t *testing.T, seed string, w *Ledger, created map[string]bool) 
 // --- Audit tests ---
 
 func TestHistory(t *testing.T) {
-	w, _ := openWallet(t)
+	w, _ := openLedger(t)
 	w.Create("alice")
 	w.Create("bob")
 	w.Deposit("alice", 1000)
@@ -946,7 +946,7 @@ func TestHistory(t *testing.T) {
 }
 
 func TestVerify(t *testing.T) {
-	w, _ := openWallet(t)
+	w, _ := openLedger(t)
 	w.Create("alice")
 	w.Deposit("alice", 1000)
 	w.Transfer("alice", "bob", 300) // auto-creates bob? no, bob must exist first
@@ -968,7 +968,7 @@ func TestVerify(t *testing.T) {
 }
 
 func TestAudit(t *testing.T) {
-	w, _ := openWallet(t)
+	w, _ := openLedger(t)
 
 	w.Create("bank")
 	w.Deposit("bank", 50000)
@@ -1003,7 +1003,7 @@ func TestAudit(t *testing.T) {
 }
 
 func TestAuditDetectsCorruption(t *testing.T) {
-	w, _ := openWallet(t)
+	w, _ := openLedger(t)
 	w.Create("alice")
 	w.Deposit("alice", 1000)
 
@@ -1024,7 +1024,7 @@ func TestAuditDetectsCorruption(t *testing.T) {
 }
 
 func TestHistoryOrder(t *testing.T) {
-	w, _ := openWallet(t)
+	w, _ := openLedger(t)
 	w.Create("alice")
 	w.Deposit("alice", 100)
 	w.Deposit("alice", 200)
@@ -1038,16 +1038,16 @@ func TestHistoryOrder(t *testing.T) {
 		t.Fatalf("expected 4 entries, got %d", len(entries))
 	}
 	// entries must be in WAL order (creation order)
-	if entries[0].Type != "wallet_create" {
+	if entries[0].Type != "ledger_create" {
 		t.Error("first entry should be create")
 	}
-	if entries[1].Type != "wallet_deposit" || entries[1].Data["amount"] != "100" {
+	if entries[1].Type != "ledger_deposit" || entries[1].Data["amount"] != "100" {
 		t.Error("second entry should be deposit 100")
 	}
-	if entries[2].Type != "wallet_deposit" || entries[2].Data["amount"] != "200" {
+	if entries[2].Type != "ledger_deposit" || entries[2].Data["amount"] != "200" {
 		t.Error("third entry should be deposit 200")
 	}
-	if entries[3].Type != "wallet_withdraw" || entries[3].Data["amount"] != "50" {
+	if entries[3].Type != "ledger_withdraw" || entries[3].Data["amount"] != "50" {
 		t.Error("fourth entry should be withdraw 50")
 	}
 }
