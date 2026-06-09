@@ -155,7 +155,11 @@ func main() {
 
 	fmt.Println("\nhistory:")
 	for _, owner := range []string{"alice", "bob"} {
-		entries, _ := w.History(owner)
+		entries, err := w.History(owner)
+		if err != nil {
+			fmt.Printf("  %s history error: %v\n", owner, err)
+			continue
+		}
 		fmt.Printf("  %s (%d entries):\n", owner, len(entries))
 		for _, v := range entries {
 			switch v.Type {

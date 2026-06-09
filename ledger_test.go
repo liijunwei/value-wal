@@ -3,8 +3,8 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"math/rand/v2"
 	"math"
+	"math/rand/v2"
 	"os"
 	"strconv"
 	"sync"
@@ -213,7 +213,7 @@ func TestPropertyBalanceSum(t *testing.T) {
 
 	net := 0
 	ops := []struct {
-		do   func() error
+		do    func() error
 		delta int
 	}{
 		{func() error { return w.Deposit("a", 100) }, 100},
@@ -254,7 +254,7 @@ func TestPropertyNoNegativeBalance(t *testing.T) {
 	// try many withdraws with random amounts, failures should never cause negative balance
 	for i := 0; i < 100; i++ {
 		bal, _ := w.Balance("x")
-		w.Withdraw("x", bal/2 + 1) // may fail, never corrupt
+		w.Withdraw("x", bal/2+1) // may fail, never corrupt
 		if b, _ := w.Balance("x"); b < 0 {
 			t.Fatalf("balance went negative: %d", b)
 		}
@@ -272,8 +272,11 @@ func TestPropertyWALMatchesState(t *testing.T) {
 	w.Transfer("a", "c", 10) // fails (c doesn't exist)
 	w.Transfer("a", "b", 30) // ok
 
-	balA, _ := w.Balance("a") // 100 - 30 = 70
-	balB, _ := w.Balance("b") // 50 + 30 = 80
+	balA, okA := w.Balance("a") // 100 - 30 = 70
+	balB, okB := w.Balance("b") // 50 + 30 = 80
+	if !okA || !okB {
+		t.Fatalf("missing account")
+	}
 
 	if balA != 70 || balB != 80 {
 		t.Fatalf("unexpected balances: a=%d, b=%d", balA, balB)
@@ -286,19 +289,20 @@ func TestPropertyWALMatchesState(t *testing.T) {
 		case "ledger_create":
 			sumFromWAL[v.Data["owner"]] = 0
 		case "ledger_deposit":
-			amount, _ := strconv.Atoi(v.Data["amount"])
-			sumFromWAL[v.Data["owner"]] += amount
+			sumFromWAL[v.Data["owner"]] += mustAtoi(v.Data["amount"])
 		case "ledger_withdraw":
-			amount, _ := strconv.Atoi(v.Data["amount"])
-			sumFromWAL[v.Data["owner"]] -= amount
+			sumFromWAL[v.Data["owner"]] -= mustAtoi(v.Data["amount"])
 		case "ledger_transfer":
-			amount, _ := strconv.Atoi(v.Data["amount"])
-			sumFromWAL[v.Data["from"]] -= amount
-			sumFromWAL[v.Data["to"]] += amount
+			amt := mustAtoi(v.Data["amount"])
+			sumFromWAL[v.Data["from"]] -= amt
+			sumFromWAL[v.Data["to"]] += amt
 		}
 	}
 	for owner, want := range sumFromWAL {
-		got, _ := w.Balance(owner)
+		got, ok := w.Balance(owner)
+		if !ok {
+			t.Fatalf("%s: missing from state", owner)
+		}
 		if got != want {
 			t.Fatalf("%s: state=%d, WAL-derived=%d", owner, got, want)
 		}
@@ -554,7 +558,7 @@ func FuzzLedger(f *testing.F) {
 				}
 				name := owners[rng.IntN(len(owners))]
 				bal := expect[name]
-				amount := 1 + rng.IntN(bal + 100) // may exceed balance
+				amount := 1 + rng.IntN(bal+100) // may exceed balance
 				err := w.Withdraw(name, amount)
 				if bal < amount {
 					if err == nil {
@@ -587,7 +591,7 @@ func FuzzLedger(f *testing.F) {
 				}
 				from, to := owners[i], owners[j]
 				fromBal := expect[from]
-				amount := 1 + rng.IntN(fromBal + 100) // may exceed balance
+				amount := 1 + rng.IntN(fromBal+100) // may exceed balance
 				err := w.Transfer(from, to, amount)
 				if fromBal < amount {
 					if err == nil {
@@ -628,6 +632,9 @@ func FuzzLedger(f *testing.F) {
 		// verify all balances match expected
 		for owner, want := range expect {
 			got, ok := w.Balance(owner)
+			if !ok {
+				t.Fatalf("%s: missing from state", owner)
+			}
 			if !ok {
 				t.Fatalf("%s missing from ledger", owner)
 			}
@@ -799,7 +806,6 @@ func TestConcurrentMixedOps(t *testing.T) {
 		t.Fatalf("sum invariant broken: a=%d, b=%d, sum=%d", a, b, a+b)
 	}
 }
-
 
 // --- Fuzz: account traceability ---
 
