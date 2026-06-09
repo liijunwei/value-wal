@@ -422,6 +422,170 @@ func TestBalancesReturnsCopy(t *testing.T) {
 	}
 }
 
+// TestPropertyFuzzLedgerHarness validates the FuzzLedger state-tracking logic
+// against the ledger's actual balances and independent WAL-derived computation.
+// Uses fixed seeds so the sequence is deterministic and repeatable.
+func TestPropertyFuzzLedgerHarness(t *testing.T) {
+	seeds := [][]byte{
+		{0},
+		{1, 2, 3},
+		{0xFF, 0x00, 0xAA, 0x55},
+	}
+
+	for s, seed := range seeds {
+		w, _ := openLedger(t)
+		rng := seedRNG(seed)
+
+		created := map[string]bool{}
+		expect := make(map[string]int)
+
+		ops := 10 + rng.IntN(100)
+		for op := 0; op < ops; op++ {
+			owners := make([]string, 0, len(created))
+			for o := range created {
+				owners = append(owners, o)
+			}
+
+			switch rng.IntN(7) {
+			case 0: // create
+				name := "u" + strconv.Itoa(rng.IntN(100000))
+				err := w.Create(name)
+				if created[name] {
+					if err == nil {
+						t.Errorf("seed %d step %d: duplicate create %s should fail", s, op, name)
+					}
+				} else {
+					if err != nil {
+						t.Errorf("seed %d step %d: create %s: %v", s, op, name, err)
+					}
+					created[name] = true
+					expect[name] = 0
+				}
+
+			case 1: // deposit (always valid)
+				if len(owners) == 0 {
+					continue
+				}
+				name := owners[rng.IntN(len(owners))]
+				amount := 1 + rng.IntN(100000)
+				if err := w.Deposit(name, amount); err != nil {
+					t.Errorf("seed %d step %d: deposit %s %d: %v", s, op, name, amount, err)
+				}
+				expect[name] += amount
+
+			case 2: // deposit to non-existent (must fail)
+				name := "nx" + strconv.Itoa(rng.IntN(100000))
+				if created[name] {
+					continue
+				}
+				amount := 1 + rng.IntN(100000)
+				if err := w.Deposit(name, amount); err == nil {
+					t.Errorf("seed %d step %d: deposit to non-existent %s should fail", s, op, name)
+				}
+
+			case 3: // withdraw (may fail)
+				if len(owners) == 0 {
+					continue
+				}
+				name := owners[rng.IntN(len(owners))]
+				bal := expect[name]
+				amount := 1 + rng.IntN(bal + 100)
+				err := w.Withdraw(name, amount)
+				if bal < amount {
+					if err == nil {
+						t.Errorf("seed %d step %d: withdraw %s %d should fail (bal=%d)", s, op, name, amount, bal)
+					}
+				} else {
+					if err != nil {
+						t.Errorf("seed %d step %d: withdraw %s %d: %v", s, op, name, amount, err)
+					}
+					expect[name] -= amount
+				}
+
+			case 4: // withdraw from non-existent (must fail)
+				name := "nx" + strconv.Itoa(rng.IntN(100000))
+				if created[name] {
+					continue
+				}
+				amount := 1 + rng.IntN(100000)
+				if err := w.Withdraw(name, amount); err == nil {
+					t.Errorf("seed %d step %d: withdraw from non-existent %s should fail", s, op, name)
+				}
+
+			case 5: // transfer (may fail)
+				if len(owners) < 2 {
+					continue
+				}
+				i, j := rng.IntN(len(owners)), rng.IntN(len(owners))
+				if i == j {
+					continue
+				}
+				from, to := owners[i], owners[j]
+				fromBal := expect[from]
+				amount := 1 + rng.IntN(fromBal + 100)
+				err := w.Transfer(from, to, amount)
+				if fromBal < amount {
+					if err == nil {
+						t.Errorf("seed %d step %d: transfer %s->%s %d should fail (bal=%d)", s, op, from, to, amount, fromBal)
+					}
+				} else {
+					if err != nil {
+						t.Errorf("seed %d step %d: transfer %s->%s %d: %v", s, op, from, to, amount, err)
+					}
+					expect[from] -= amount
+					expect[to] += amount
+				}
+
+			case 6: // invalid transfer (must fail)
+				if len(owners) == 0 {
+					continue
+				}
+				from := owners[rng.IntN(len(owners))]
+				amount := 1 + rng.IntN(100000)
+				if rng.IntN(2) == 0 {
+					if err := w.Transfer(from, from, amount); err == nil {
+						t.Errorf("seed %d step %d: self-transfer %s should fail", s, op, from)
+					}
+				} else {
+					to := "nx" + strconv.Itoa(rng.IntN(100000))
+					if created[to] {
+						continue
+					}
+					if err := w.Transfer(from, to, amount); err == nil {
+						t.Errorf("seed %d step %d: transfer to non-existent %s->%s should fail", s, op, from, to)
+					}
+				}
+			}
+
+			// After each operation: expect must match actual ledger state
+			for name, want := range expect {
+				got, ok := w.Balance(name)
+				if !ok {
+					t.Fatalf("seed %d step %d: %s missing from ledger", s, op, name)
+				}
+				if got != want {
+					t.Fatalf("seed %d step %d: %s expect=%d actual=%d", s, op, name, want, got)
+				}
+			}
+		}
+
+		// Final: expect must match independent WAL-derived computation
+		for name := range expect {
+			derived := 0
+			for _, v := range w.Entries() {
+				delta, err := valueBalanceDelta(v, name)
+				if err != nil {
+					t.Fatalf("seed %d: corrupt entry %d: %v", s, v.ID, err)
+				}
+				derived += delta
+			}
+			if derived != expect[name] {
+				t.Errorf("seed %d: %s WAL-derived=%d expect=%d", s, name, derived, expect[name])
+			}
+		}
+	}
+}
+
 // --- Fuzz helpers ---
 
 // seedRNG derives a deterministic *rand.Rand from a fuzz seed byte slice.
@@ -511,8 +675,8 @@ func FuzzLedger(f *testing.F) {
 				owners = append(owners, o)
 			}
 
-			switch rng.IntN(4) {
-			case 0: // create
+			switch rng.IntN(7) {
+			case 0: // create (random name, may be duplicate)
 				name := "u" + strconv.Itoa(rng.IntN(100000))
 				err := w.Create(name)
 				if created[name] {
@@ -527,33 +691,36 @@ func FuzzLedger(f *testing.F) {
 					expect[name] = 0
 				}
 
-			case 1: // deposit
+			case 1: // deposit (always valid)
 				if len(owners) == 0 {
 					continue
 				}
 				name := owners[rng.IntN(len(owners))]
 				amount := 1 + rng.IntN(100000)
-				err := w.Deposit(name, amount)
-				if amount <= 0 || !created[name] {
-					if err == nil {
-						t.Fatalf("step %d: deposit %s %d should fail", op, name, amount)
-					}
-				} else {
-					if err != nil {
-						t.Fatalf("step %d: deposit %s %d: %v", op, name, amount, err)
-					}
-					expect[name] += amount
+				if err := w.Deposit(name, amount); err != nil {
+					t.Fatalf("step %d: deposit %s %d: %v", op, name, amount, err)
+				}
+				expect[name] += amount
+
+			case 2: // deposit to non-existent (must fail)
+				name := "nx" + strconv.Itoa(rng.IntN(100000))
+				if created[name] {
+					continue
+				}
+				amount := 1 + rng.IntN(100000)
+				if err := w.Deposit(name, amount); err == nil {
+					t.Fatalf("step %d: deposit to non-existent %s should fail", op, name)
 				}
 
-			case 2: // withdraw
+			case 3: // withdraw (may fail on insufficient balance)
 				if len(owners) == 0 {
 					continue
 				}
 				name := owners[rng.IntN(len(owners))]
 				bal := expect[name]
-				amount := 1 + rng.IntN(bal + 100) // may exceed balance to test failure path
+				amount := 1 + rng.IntN(bal + 100) // may exceed balance
 				err := w.Withdraw(name, amount)
-				if amount <= 0 || !created[name] || bal < amount {
+				if bal < amount {
 					if err == nil {
 						t.Fatalf("step %d: withdraw %s %d should fail (bal=%d)", op, name, amount, bal)
 					}
@@ -564,7 +731,17 @@ func FuzzLedger(f *testing.F) {
 					expect[name] -= amount
 				}
 
-			case 3: // transfer
+			case 4: // withdraw from non-existent (must fail)
+				name := "nx" + strconv.Itoa(rng.IntN(100000))
+				if created[name] {
+					continue
+				}
+				amount := 1 + rng.IntN(100000)
+				if err := w.Withdraw(name, amount); err == nil {
+					t.Fatalf("step %d: withdraw from non-existent %s should fail", op, name)
+				}
+
+			case 5: // transfer (may fail on insufficient balance)
 				if len(owners) < 2 {
 					continue
 				}
@@ -576,10 +753,9 @@ func FuzzLedger(f *testing.F) {
 				fromBal := expect[from]
 				amount := 1 + rng.IntN(fromBal + 100) // may exceed balance
 				err := w.Transfer(from, to, amount)
-				shouldFail := !created[from] || !created[to] || from == to || amount <= 0 || fromBal < amount
-				if shouldFail {
+				if fromBal < amount {
 					if err == nil {
-						t.Fatalf("step %d: transfer %s->%s %d should fail", op, from, to, amount)
+						t.Fatalf("step %d: transfer %s->%s %d should fail (bal=%d)", op, from, to, amount, fromBal)
 					}
 				} else {
 					if err != nil {
@@ -587,6 +763,28 @@ func FuzzLedger(f *testing.F) {
 					}
 					expect[from] -= amount
 					expect[to] += amount
+				}
+
+			case 6: // invalid transfer: self or non-existent (must fail)
+				if len(owners) == 0 {
+					continue
+				}
+				from := owners[rng.IntN(len(owners))]
+				amount := 1 + rng.IntN(100000)
+				if rng.IntN(2) == 0 {
+					// self-transfer
+					if err := w.Transfer(from, from, amount); err == nil {
+						t.Fatalf("step %d: self-transfer %s should fail", op, from)
+					}
+				} else {
+					// transfer to non-existent
+					to := "nx" + strconv.Itoa(rng.IntN(100000))
+					if created[to] {
+						continue
+					}
+					if err := w.Transfer(from, to, amount); err == nil {
+						t.Fatalf("step %d: transfer to non-existent %s->%s should fail", op, from, to)
+					}
 				}
 			}
 		}
