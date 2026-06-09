@@ -14,7 +14,7 @@ const (
 	exchangeInit = 100_000_000
 	numUsers     = 10_000
 	maxInitCap   = 10_000
-	totalRounds  = 30_000 // 每轮 30~50 笔撮合 → 总量 ~1.2M 笔
+	totalRounds  = 30_000 // 30–50 matches per round, ~1.2M total
 	transferCap  = 1000
 )
 
@@ -73,7 +73,7 @@ func TestSimulation(t *testing.T) {
 			initialCap[name] = cap
 		}
 
-		// 离场: swap-delete
+		// User exit: swap-delete
 		if round > 0 && round%200 == 0 {
 			nLeave := 2 + rng.IntN(7)
 			if len(activeList) > nLeave+10 {
@@ -91,7 +91,7 @@ func TestSimulation(t *testing.T) {
 		if len(activeList) < 2 {
 			continue
 		}
-		matches := 30 + rng.IntN(21) // 30~50 组
+		matches := 30 + rng.IntN(21) // 30~50 pairs
 		for m := 0; m < matches; m++ {
 			i, j := rng.IntN(len(activeList)), rng.IntN(len(activeList))
 			from, to := activeList[i], activeList[j]
@@ -118,7 +118,7 @@ func TestSimulation(t *testing.T) {
 	exBal, ok := w.Balance("exchange")
 	assert(ok, "exchange balance")
 
-	// 收集各用户最终余额与涨跌
+	// Collect final balances and gains/losses per user
 	var results []userResult
 	for name := range activeSet {
 		bal, ok := w.Balance(name)
@@ -131,7 +131,7 @@ func TestSimulation(t *testing.T) {
 		results = append(results, userResult{name, initialCap[name], bal, false})
 	}
 
-	// 统计涨跌
+	// Tally gains and losses
 	gainCount, lossCount, evenCount := 0, 0, 0
 	totalInitial := 0
 	totalFinal := exBal
@@ -147,28 +147,28 @@ func TestSimulation(t *testing.T) {
 		}
 	}
 
-	fmt.Println("=== 交易所模拟报告 ===")
-	fmt.Printf("交易轮数: %d (成功 %d, 失败 %d, 梭哈 %d)\n", totalRounds, success, fail, allIn)
-	fmt.Printf("总用户: active=%d, inactive=%d, 中途入场=%d\n", len(activeSet), len(inactive), len(joinSeq))
+	fmt.Println("=== Exchange Simulation Report ===")
+	fmt.Printf("Rounds: %d (success %d, fail %d, all-in %d)\n", totalRounds, success, fail, allIn)
+	fmt.Printf("Users: active=%d, inactive=%d, mid-join=%d\n", len(activeSet), len(inactive), len(joinSeq))
 	fmt.Println()
-	fmt.Printf("资金守恒: exchange_init=%d, current_sum=%d, diff=%d\n", exchangeInit, totalFinal, totalFinal-exchangeInit)
+	fmt.Printf("Conservation: exchange_init=%d, current_sum=%d, diff=%d\n", exchangeInit, totalFinal, totalFinal-exchangeInit)
 	fmt.Println()
-	fmt.Printf("交易所余额: %d\n", exBal)
+	fmt.Printf("Exchange balance: %d\n", exBal)
 	fmt.Println()
-	fmt.Printf("用户初始资金总计: %d\n", totalInitial)
-	fmt.Printf("用户最终余额总计: %d (涨跌: %+d, %.2f%%)\n",
+	fmt.Printf("Total initial user funds: %d\n", totalInitial)
+	fmt.Printf("Total final user balances: %d (Δ: %+d, %.2f%%)\n",
 		totalFinal-exBal, totalFinal-exBal-totalInitial,
 		float64(totalFinal-exBal-totalInitial)/float64(totalInitial)*100)
 	fmt.Println()
-	fmt.Printf("用户涨跌分布: 赚=%d, 亏=%d, 持平=%d\n", gainCount, lossCount, evenCount)
+	fmt.Printf("Gain/loss distribution: up=%d, down=%d, even=%d\n", gainCount, lossCount, evenCount)
 	fmt.Println()
-	fmt.Println("活跃用户余额分布:")
+	fmt.Println("Active user balance distribution:")
 	printBalDistrib(results, func(r userResult) bool { return r.active })
 	fmt.Println()
-	fmt.Println("离场用户余额分布:")
+	fmt.Println("Exited user balance distribution:")
 	printBalDistrib(results, func(r userResult) bool { return !r.active })
 	fmt.Println()
-	// 梭哈用户（至少一次转账清空余额）
+	// All-in users (at least one transfer emptied their balance)
 	var allInProfit, allInLoss, allInBroke int
 	var allInProfitUsers, allInLossUsers, allInBrokeUsers []userResult
 	for _, r := range results {
@@ -185,20 +185,20 @@ func TestSimulation(t *testing.T) {
 			}
 		}
 	}
-	fmt.Printf("梭哈用户: %d 人（至少一次转账清空余额）\n", len(allInSet))
-	fmt.Printf("  翻身盈利: %d 人\n", allInProfit)
+	fmt.Printf("All-in users: %d (emptied balance at least once)\n", len(allInSet))
+	fmt.Printf("  Recovered to profit: %d\n", allInProfit)
 	if len(allInProfitUsers) > 0 {
 		sort.Slice(allInProfitUsers, func(i, j int) bool { return allInProfitUsers[i].final-allInProfitUsers[i].initial > allInProfitUsers[j].final-allInProfitUsers[j].initial })
 		p := allInProfitUsers[len(allInProfitUsers)/2]
-		fmt.Printf("    中位盈利: +%d\n", p.final-p.initial)
+		fmt.Printf("    Median profit: +%d\n", p.final-p.initial)
 	}
-	fmt.Printf("  亏损未归零: %d 人\n", allInLoss)
+	fmt.Printf("  Down but not broke: %d\n", allInLoss)
 	if len(allInLossUsers) > 0 {
 		sort.Slice(allInLossUsers, func(i, j int) bool { return allInLossUsers[i].final-allInLossUsers[i].initial > allInLossUsers[j].final-allInLossUsers[j].initial })
 		p := allInLossUsers[len(allInLossUsers)/2]
-		fmt.Printf("    中位亏损: %d\n", p.final-p.initial)
+		fmt.Printf("    Median loss: %d\n", p.final-p.initial)
 	}
-	fmt.Printf("  最终归零: %d 人\n", allInBroke)
+	fmt.Printf("  Ended at zero: %d\n", allInBroke)
 	if len(allInBrokeUsers) > 0 {
 		var initials []int
 		sumInit := 0
@@ -207,12 +207,12 @@ func TestSimulation(t *testing.T) {
 			sumInit += r.initial
 		}
 		sort.Ints(initials)
-		fmt.Printf("    带入资金: %d, 人均: %d, min=%d p50=%d max=%d\n",
+		fmt.Printf("    Brought in: %d, avg: %d, min=%d p50=%d max=%d\n",
 			sumInit, sumInit/len(allInBrokeUsers), initials[0], initials[len(initials)/2], initials[len(initials)-1])
 	}
 
 	if totalFinal != exchangeInit {
-		t.Errorf("资金不守恒: %d != %d", totalFinal, exchangeInit)
+		t.Errorf("conservation broken: %d != %d", totalFinal, exchangeInit)
 	}
 
 	allBefore := w.Balances()
@@ -228,10 +228,10 @@ func TestSimulation(t *testing.T) {
 	for name, want := range allBefore {
 		got, ok := allAfter[name]
 		if !ok {
-			t.Errorf("%s 在恢复后丢失", name)
+			t.Errorf("%s missing after recovery", name)
 		}
 		if got != want {
-			t.Errorf("%s: 恢复前 %d, 恢复后 %d", name, want, got)
+			t.Errorf("%s: before recovery %d, after %d", name, want, got)
 		}
 	}
 }
@@ -254,7 +254,7 @@ func printBalDistrib(results []userResult, filter func(userResult) bool) {
 		}
 	}
 	if len(bals) == 0 {
-		fmt.Println("  (无数据)")
+		fmt.Println("  (no data)")
 		return
 	}
 	sort.Ints(bals)
@@ -266,7 +266,7 @@ func printBalDistrib(results []userResult, filter func(userResult) bool) {
 		len(bals), sum, bals[0], p(0.25), p(0.50), p(0.75), p(0.95), p(0.99), bals[len(bals)-1])
 }
 
-// --- PBT: 资金守恒 ---
+// --- PBT: conservation of funds ---
 
 func TestSimPropertySum(t *testing.T) {
 	path := "sim-pbt-wal.jsonl"
@@ -352,7 +352,7 @@ func TestSimPropertySum(t *testing.T) {
 	}
 }
 
-// --- Fuzz: 随机操作序列验证不变式 ---
+// --- Fuzz: random op sequences verify invariants ---
 
 func FuzzSimulation(f *testing.F) {
 	f.Add("c a c b d a 100 t a b 50")
@@ -452,7 +452,7 @@ func FuzzSimulation(f *testing.F) {
 			}
 		}
 
-		// 最终验证
+		// Final verification
 		currentSum := 0
 		for name := range created {
 			bal, ok := w.Balance(name)

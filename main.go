@@ -115,25 +115,25 @@ func main() {
 	}
 	defer w.Close()
 
-	// 建账户
+	// Create accounts
 	w.Create("alice")
 	w.Create("bob")
 
-	// 存款
+	// Deposit
 	w.Deposit("alice", 1000)
 	w.Deposit("bob", 500)
 
-	// 转账
+	// Transfer
 	if err := w.Transfer("alice", "bob", 300); err != nil {
 		fmt.Println("transfer:", err)
 	}
 
-	// 余额不足
+	// Insufficient balance (rejected)
 	if err := w.Withdraw("alice", 2000); err != nil {
 		fmt.Println("withdraw rejected:", err)
 	}
 
-	// 正常提现
+	// Withdraw
 	if err := w.Withdraw("alice", 200); err != nil {
 		fmt.Println("withdraw:", err)
 	}
@@ -143,7 +143,7 @@ func main() {
 		fmt.Printf("  %s: %d\n", owner, bal)
 	}
 
-	// 审计
+	// Audit
 	fmt.Println("\naudit:")
 	failures := w.Audit()
 	if len(failures) == 0 {
@@ -175,7 +175,7 @@ func main() {
 		}
 	}
 
-	// 崩溃恢复
+	// Crash recovery
 	w.Close()
 	w2, err := NewLedger(path)
 	assert(err == nil, "reopen ledger after close")

@@ -1,55 +1,55 @@
-# 交易所模拟 - 基于 WAL 的钱包系统
+# Exchange simulation - ledger system backed by WAL
 #
-# 用法: make [target]
-# 默认 target: help
+# Usage: make [target]
+# Default target: help
 
 .DEFAULT_GOAL := help
 
 .PHONY: help test test-sim test-pbt fuzz fuzz-all bench cover run
 
-help: ## 显示帮助
+help: ## Show help
 	@echo "targets:"
 	@echo ""
 	@awk 'BEGIN { FS=":.*## " } /^[a-zA-Z_-]+:.*## / { printf "  %-16s %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
 
-test: ## 运行所有测试
+test: ## Run all tests
 	go test -count=1 -timeout 120s ./...
 
-test-sim: ## 交易所模拟（1万用户、100万轮交易），输出资金分布报告
+test-sim: ## Exchange simulation (10k users, ~1.2M transfers), prints balance distribution report
 	go test -v -run TestSimulation$$ -count=1 -timeout 30s .
 
-test-pbt: ## 资金守恒 PBT（5000 次随机操作，每步校验不变式）
+test-pbt: ## Conservation PBT (5000 random ops, invariant check at each step)
 	go test -v -run TestSimPropertySum$$ -count=1 -timeout 30s .
 
-fuzz: ## 模糊测试（随机命令序列，30 秒）
+fuzz: ## Fuzz test (random command sequences, 30s)
 	go test -run='^$$' -fuzz=FuzzSimulation -fuzztime=30s -timeout 60s .
 
-fuzz-crash: ## 模糊测试（崩溃恢复，30 秒）
+fuzz-crash: ## Fuzz test (crash recovery, 30s)
 	go test -run='^$$' -fuzz=FuzzCrashRecovery -fuzztime=30s -timeout 60s .
 
-fuzz-atomic: ## 模糊测试（transfer 原子性，30 秒）
+fuzz-atomic: ## Fuzz test (transfer atomicity, 30s)
 	go test -run='^$$' -fuzz=FuzzTransferAtomicity -fuzztime=30s -timeout 60s .
 
-fuzz-append: ## 模糊测试（WAL 只追加，30 秒）
+fuzz-append: ## Fuzz test (WAL append-only, 30s)
 	go test -run='^$$' -fuzz=FuzzWALAppendOnly -fuzztime=30s -timeout 60s .
 
-fuzz-trace: ## 模糊测试（单账户可溯源，30 秒）
+fuzz-trace: ## Fuzz test (account traceability, 30s)
 	go test -run='^$$' -fuzz=FuzzAccountTraceability -fuzztime=30s -timeout 60s .
 
-fuzz-all: ## 模糊测试（全部 5 个，各 10 秒）
+fuzz-all: ## Fuzz test (all 5, 10s each)
 	go test -run='^$$' -fuzz=FuzzSimulation -fuzztime=10s -timeout 120s .
 	go test -run='^$$' -fuzz=FuzzCrashRecovery -fuzztime=10s -timeout 120s .
 	go test -run='^$$' -fuzz=FuzzTransferAtomicity -fuzztime=10s -timeout 120s .
 	go test -run='^$$' -fuzz=FuzzWALAppendOnly -fuzztime=10s -timeout 120s .
 	go test -run='^$$' -fuzz=FuzzAccountTraceability -fuzztime=10s -timeout 120s .
 
-bench: ## 基准测试
+bench: ## Benchmark
 	go test -run='^$$' -bench=. -benchtime=3s -timeout 120s .
 
-cover: ## 测试覆盖率报告
+cover: ## Test coverage report
 	go test -coverprofile=cover.out -timeout 30s ./...
 	go tool cover -func=cover.out
 	rm -f cover.out
 
-run: ## 运行钱包演示
+run: ## Run ledger demo
 	go run .

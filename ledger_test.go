@@ -439,20 +439,24 @@ func FuzzLedger(f *testing.F) {
 		created := make(map[string]bool)
 		opCount := 0
 
-		lines := strings.Split(seed, " ")
-		for _, line := range lines {
-			if line == "" {
+		tokens := strings.Split(seed, " ")
+		i := 0
+		for i < len(tokens) {
+			if tokens[i] == "" {
+				i++
 				continue
 			}
-			parts := strings.Split(line, " ")
-			if len(parts) < 2 {
-				continue
-			}
+			cmd := tokens[i]
+			i++
 			opCount++
 
-			switch parts[0] {
+			switch cmd {
 			case "c": // create owner
-				owner := parts[1]
+				if i >= len(tokens) {
+					break
+				}
+				owner := tokens[i]
+				i++
 				err := w.Create(owner)
 				if created[owner] {
 					if err == nil {
@@ -467,11 +471,12 @@ func FuzzLedger(f *testing.F) {
 				}
 
 			case "d": // deposit owner amount
-				if len(parts) < 3 {
-					continue
+				if i+1 >= len(tokens) {
+					break
 				}
-				owner := parts[1]
-				amount, err := strconv.Atoi(parts[2])
+				owner := tokens[i]
+				amount, err := strconv.Atoi(tokens[i+1])
+				i += 2
 				if err != nil {
 					continue
 				}
@@ -488,11 +493,12 @@ func FuzzLedger(f *testing.F) {
 				}
 
 			case "w": // withdraw owner amount
-				if len(parts) < 3 {
-					continue
+				if i+1 >= len(tokens) {
+					break
 				}
-				owner := parts[1]
-				amount, err := strconv.Atoi(parts[2])
+				owner := tokens[i]
+				amount, err := strconv.Atoi(tokens[i+1])
+				i += 2
 				if err != nil {
 					continue
 				}
@@ -509,11 +515,12 @@ func FuzzLedger(f *testing.F) {
 				}
 
 			case "t": // transfer from to amount
-				if len(parts) < 4 {
-					continue
+				if i+2 >= len(tokens) {
+					break
 				}
-				from, to := parts[1], parts[2]
-				amount, err := strconv.Atoi(parts[3])
+				from, to := tokens[i], tokens[i+1]
+				amount, err := strconv.Atoi(tokens[i+2])
+				i += 3
 				if err != nil {
 					continue
 				}
@@ -693,7 +700,7 @@ func TestConcurrentMixedOps(t *testing.T) {
 	}
 }
 
-// --- Fuzz: transfer 原子性 ---
+// --- Fuzz: transfer atomicity ---
 
 func FuzzTransferAtomicity(f *testing.F) {
 	f.Add("c a c b d a 100 t a b 50")
@@ -733,7 +740,7 @@ func FuzzTransferAtomicity(f *testing.F) {
 	})
 }
 
-// --- Fuzz: WAL 只追加 ---
+// --- Fuzz: WAL append-only ---
 
 func FuzzWALAppendOnly(f *testing.F) {
 	f.Add("c a c b d a 100 d b 50 t a b 20")
@@ -775,7 +782,7 @@ func FuzzWALAppendOnly(f *testing.F) {
 	})
 }
 
-// --- Fuzz: 单账户可溯源 ---
+// --- Fuzz: account traceability ---
 
 func FuzzAccountTraceability(f *testing.F) {
 	f.Add("c a c b d a 100 d b 50 t a b 20 w a 30")
@@ -805,7 +812,7 @@ func FuzzAccountTraceability(f *testing.F) {
 	})
 }
 
-// --- PBT: 并发安全 ---
+// --- PBT: concurrency safety ---
 
 func TestPropertyConcurrentSafety(t *testing.T) {
 	w, _ := openLedger(t)
@@ -861,34 +868,45 @@ func TestPropertyConcurrentSafety(t *testing.T) {
 
 func parseAndRun(t *testing.T, seed string, w *Ledger, created map[string]bool) {
 	t.Helper()
-	for _, line := range strings.Split(seed, " ") {
-		parts := strings.Split(line, " ")
-		if len(parts) < 2 {
+	tokens := strings.Split(seed, " ")
+	i := 0
+	for i < len(tokens) {
+		if tokens[i] == "" {
+			i++
 			continue
 		}
-		switch parts[0] {
+		cmd := tokens[i]
+		i++
+
+		switch cmd {
 		case "c":
-			owner := parts[1]
+			if i >= len(tokens) {
+				break
+			}
+			owner := tokens[i]
+			i++
 			if !created[owner] {
 				w.Create(owner)
 				created[owner] = true
 			}
 		case "d":
-			if len(parts) < 3 {
-				continue
+			if i+1 >= len(tokens) {
+				break
 			}
-			owner := parts[1]
-			amount, err := strconv.Atoi(parts[2])
+			owner := tokens[i]
+			amount, err := strconv.Atoi(tokens[i+1])
+			i += 2
 			if err != nil || amount <= 0 || !created[owner] {
 				continue
 			}
 			w.Deposit(owner, amount)
 		case "w":
-			if len(parts) < 3 {
-				continue
+			if i+1 >= len(tokens) {
+				break
 			}
-			owner := parts[1]
-			amount, err := strconv.Atoi(parts[2])
+			owner := tokens[i]
+			amount, err := strconv.Atoi(tokens[i+1])
+			i += 2
 			if err != nil || amount <= 0 || !created[owner] {
 				continue
 			}
@@ -897,11 +915,12 @@ func parseAndRun(t *testing.T, seed string, w *Ledger, created map[string]bool) 
 				w.Withdraw(owner, amount)
 			}
 		case "t":
-			if len(parts) < 4 {
-				continue
+			if i+2 >= len(tokens) {
+				break
 			}
-			from, to := parts[1], parts[2]
-			amount, err := strconv.Atoi(parts[3])
+			from, to := tokens[i], tokens[i+1]
+			amount, err := strconv.Atoi(tokens[i+2])
+			i += 3
 			if err != nil || amount <= 0 || from == to || !created[from] || !created[to] {
 				continue
 			}
