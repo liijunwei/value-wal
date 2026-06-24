@@ -5,3 +5,6 @@ tmp/
 *.jsonl
 *.prof
 testdata/
+.clj-kondo/
+.cpcache/
+.lsp/
